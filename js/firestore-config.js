@@ -1,18 +1,14 @@
 /**
  * firestore-config.js
- * Configuração do Cloud Firestore para o Sistema de Controle de Compras e Recebimento
+ * Configuração e utilitários para o Cloud Firestore
  * 
- * NOTA: Este arquivo será usado quando a migração do Realtime Database for concluída
- * Status: PLANEJADO - Aguardando implementação da migração
+ * ATUALIZADO: Removido qualquer suporte a Realtime Database
  */
 
-console.log('firestore-config.js carregado - MODO PLANEJADO');
-
-// Configuração do Firebase (mesma do firebase-config.js)
-const firestoreConfig = {
+// Configuração do Firebase (será a mesma do firebase-config.js)
+const firebaseConfig = {
   apiKey: "AIzaSyC2Zi40wsyBoTeXb2syXvrogTb56lAVjk0",
   authDomain: "pcp-2e388.firebaseapp.com",
-  databaseURL: "https://pcp-2e388-default-rtdb.firebaseio.com", // Ainda será usado durante a transição
   projectId: "pcp-2e388",
   storageBucket: "pcp-2e388.appspot.com",
   messagingSenderId: "725540904176",
@@ -21,192 +17,160 @@ const firestoreConfig = {
 };
 
 /**
- * Função para inicializar o Firestore (será usada após a migração)
- * Esta função substituirá a inicialização do Realtime Database
+ * Inicializa o Firebase e configura o Firestore
+ * @returns {Promise<Object>} Promise que resolve quando a inicialização for concluída
  */
-function initFirestore() {
+async function initializeFirestore() {
+  console.log('Inicializando Firestore...');
+
+  // Verificar se o Firebase já foi inicializado
+  if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+  }
+
+  // Verificar se o Firestore está disponível
+  if (typeof firebase.firestore !== 'function') {
+    throw new Error('Firebase Firestore não está disponível');
+  }
+
   try {
-    console.log('Inicializando Cloud Firestore...');
-    
-    // Inicializar o Firebase se ainda não foi inicializado
-    if (!firebase.apps.length) {
-      firebase.initializeApp(firestoreConfig);
-      console.log('Firebase inicializado com sucesso');
-    } else {
-      firebase.app();
-      console.log('Firebase já estava inicializado.');
-    }
-    
-    // Referência ao Firestore
+    // Inicializar Firestore
     const db = firebase.firestore();
-    console.log('Referência ao Cloud Firestore criada.');
     
-    // Configurações de performance
+    // Configurar cache e persistência offline
     db.settings({
       cacheSizeBytes: firebase.firestore.CACHE_SIZE_UNLIMITED
     });
     
-    // Habilitar persistência offline
-    db.enablePersistence()
-      .then(() => {
-        console.log('Persistência offline habilitada');
-      })
-      .catch((err) => {
-        if (err.code == 'failed-precondition') {
-          console.log('Múltiplas abas abertas, persistência desabilitada');
-        } else if (err.code == 'unimplemented') {
-          console.log('Navegador não suporta persistência');
-        }
-      });
+    try {
+      await db.enablePersistence();
+      console.log('Persistência offline habilitada');
+    } catch (e) {
+      if (e.code === 'failed-precondition') {
+        console.warn('Múltiplas abas abertas, persistência offline não disponível');
+      } else if (e.code === 'unimplemented') {
+        console.warn('Navegador não suporta persistência offline');
+      }
+    }
     
-    // Exportar as referências para uso global
-    window.firestoreDB = db;
-    
-    // Definir referências estruturadas conforme nova arquitetura
-    window.firestoreRefs = {
-      // Coleções principais
+    // Criar objetos de acesso ao Firestore
+    window.db = db;
+    window.dbRef = {
       clientes: db.collection('clientes'),
       fornecedores: db.collection('fornecedores'),
       usuarios: db.collection('usuarios'),
-      
-      // Coleções de processos
       separacaoProd: db.collection('SeparacaoProd'),
-      correcaoFinal: db.collection('CorrecaoFinal'),
-      
-      // Função helper para acessar itens de forma dinâmica
-      getItensCollection: (clienteId, projetoId, listaId) => {
-        return db.collection(`clientes/${clienteId}/projetos/${projetoId}/listas/${listaId}/itens`);
+      correcaoFinal: db.collection('CorrecaoFinal')
+    };
+    
+    // Utilitários para Firestore
+    window.FirestoreUtils = {
+      /**
+       * Cria um documento com timestamp
+       * @param {Object} data - Dados a serem salvos
+       * @returns {Object} Dados com timestamps adicionados
+       */
+      createDocument: (data) => {
+        return {
+          ...data,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
       },
       
-      // Função para consultas de collection group
-      getAllItens: () => {
-        return db.collectionGroup('itens');
+      /**
+       * Atualiza um documento com timestamp de atualização
+       * @param {Object} data - Dados a serem atualizados
+       * @returns {Object} Dados com timestamp atualizado
+       */
+      updateDocument: (data) => {
+        return {
+          ...data,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
       },
       
-      // Função para batch operations
-      createBatch: () => {
-        return db.batch();
+      /**
+       * Busca itens comprados usando collectionGroup
+       * @returns {Promise<Array>} Promise que resolve com array de itens comprados
+       */
+      getCompradosItems: async () => {
+        const snapshot = await db.collectionGroup('itens')
+          .where('statusCompra', '==', 'comprado')
+          .get();
+          
+        return snapshot.docs.map(doc => ({
+          id: doc.id,
+          ref: doc.ref,
+          path: doc.ref.path,
+          ...doc.data()
+        }));
       },
       
-      // Função para transações
-      runTransaction: (updateFunction) => {
-        return db.runTransaction(updateFunction);
+      /**
+       * Busca itens recebidos usando collectionGroup
+       * @returns {Promise<Array>} Promise que resolve com array de itens recebidos
+       */
+      getRecebidosItems: async () => {
+        const snapshot = await db.collectionGroup('itens')
+          .where('statusRecebimento', '==', 'recebido')
+          .get();
+          
+        return snapshot.docs.map(doc => ({
+          id: doc.id,
+          ref: doc.ref,
+          path: doc.ref.path,
+          ...doc.data()
+        }));
+      },
+      
+      /**
+       * Busca itens por fornecedor
+       * @param {string} fornecedor - Nome do fornecedor
+       * @returns {Promise<Array>} Promise que resolve com array de itens do fornecedor
+       */
+      getItemsByFornecedor: async (fornecedor) => {
+        const snapshot = await db.collectionGroup('itens')
+          .where('fornecedor', '==', fornecedor)
+          .get();
+          
+        return snapshot.docs.map(doc => ({
+          id: doc.id,
+          ref: doc.ref,
+          path: doc.ref.path,
+          ...doc.data()
+        }));
+      },
+      
+      /**
+       * Cria múltiplos documentos em batch
+       * @param {Array} items - Array de itens para criar
+       * @param {Object} collectionRef - Referência para a coleção
+       * @returns {Promise} Promise que resolve quando o batch for commitado
+       */
+      createBatch: async (items, collectionRef) => {
+        const batch = db.batch();
+        
+        items.forEach(item => {
+          const docRef = collectionRef.doc(item.id || db.collection('_temp').doc().id);
+          batch.set(docRef, {
+            ...item,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        });
+        
+        return batch.commit();
       }
     };
     
-    console.log('window.firestoreRefs criado e disponível globalmente:', window.firestoreRefs);
-    
-    // Teste de conectividade
-    return db.collection('_test').limit(1).get()
-      .then(() => {
-        console.log('Conectado ao Cloud Firestore com sucesso!');
-        return true;
-      })
-      .catch(error => {
-        console.error('Erro ao conectar com o Firestore:', error);
-        return false;
-      });
-    
+    console.log('Firestore inicializado com sucesso');
+    return { db, dbRef: window.dbRef };
   } catch (error) {
-    console.error('Erro crítico ao inicializar Cloud Firestore:', error);
-    
-    // Fallback para Realtime Database durante a transição
-    console.log('Fazendo fallback para Firebase Realtime Database...');
-    if (typeof firebase.database === 'function') {
-      return false; // Indica que deve usar o Realtime Database
-    }
-    
+    console.error('Erro ao inicializar Firestore:', error);
     throw error;
   }
 }
 
-/**
- * Funções utilitárias para operações comuns do Firestore
- */
-const FirestoreUtils = {
-  
-  /**
-   * Criar um item com IDs desnormalizados
-   */
-  createItemWithDenormalizedIds: (itemData, clienteId, projetoId, listaId) => {
-    return {
-      ...itemData,
-      clienteId: clienteId,
-      projetoId: projetoId,
-      listaId: listaId,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
-  },
-  
-  /**
-   * Atualizar timestamp de modificação
-   */
-  updateTimestamp: (updateData) => {
-    return {
-      ...updateData,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
-  },
-  
-  /**
-   * Buscar itens por status usando collection group
-   */
-  getItensByStatus: async (status, additionalFilters = {}) => {
-    let query = window.firestoreRefs.getAllItens().where('status', '==', status);
-    
-    // Adicionar filtros adicionais
-    Object.entries(additionalFilters).forEach(([field, value]) => {
-      query = query.where(field, '==', value);
-    });
-    
-    const snapshot = await query.get();
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      path: doc.ref.path,
-      ...doc.data()
-    }));
-  },
-  
-  /**
-   * Atualizar status de um item
-   */
-  updateItemStatus: async (itemPath, newStatus, additionalData = {}) => {
-    const updateData = FirestoreUtils.updateTimestamp({
-      status: newStatus,
-      ...additionalData
-    });
-    
-    return window.firestoreDB.doc(itemPath).update(updateData);
-  },
-  
-  /**
-   * Salvar múltiplos itens usando batch
-   */
-  saveItemsBatch: async (items, clienteId, projetoId, listaId) => {
-    const batch = window.firestoreRefs.createBatch();
-    const itemsRef = window.firestoreRefs.getItensCollection(clienteId, projetoId, listaId);
-    
-    items.forEach(itemData => {
-      const itemRef = itemsRef.doc();
-      const enrichedItem = FirestoreUtils.createItemWithDenormalizedIds(
-        itemData, clienteId, projetoId, listaId
-      );
-      batch.set(itemRef, enrichedItem);
-    });
-    
-    return batch.commit();
-  }
-};
-
-// Exportar utilitários para uso global
-window.FirestoreUtils = FirestoreUtils;
-
-// Esta função será chamada quando a migração for ativada
-// Por enquanto, ela só está documentada e pronta para uso
-console.log('Configuração do Firestore pronta. Use initFirestore() quando a migração for ativada.');
-
-// Exportar para uso em outros módulos
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { initFirestore, FirestoreUtils, firestoreConfig };
-}
+// Exportar função para uso global
+window.initializeFirestore = initializeFirestore;

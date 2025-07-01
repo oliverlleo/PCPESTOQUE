@@ -48,24 +48,54 @@ document.addEventListener('DOMContentLoaded', function() {
                 }, 1000);
             } else {
                 console.error('dbRef ainda não disponível após várias tentativas');
-                alert('Erro ao conectar ao banco de dados. Por favor, recarregue a página.');
                 
                 // Tenta criar manualmente a referência como último recurso
                 try {
                     console.log('Tentando criar referência manualmente...');
-                    if (firebase && firebase.database) {
+                    // Verifica se db (Firestore) está disponível
+                    if (window.db) {
+                        console.log('window.db encontrado, criando referências Firestore...');
                         window.dbRef = {
-                            clientes: firebase.database().ref('clientes'),
-                            projetos: firebase.database().ref('projetos')
+                            clientes: window.db.collection('clientes'),
+                            projetos: window.db.collection('projetos'),
+                            fornecedores: window.db.collection('fornecedores'),
+                            usuarios: window.db.collection('usuarios'),
+                            separacaoProd: window.db.collection('SeparacaoProd'),
+                            correcaoFinal: window.db.collection('CorrecaoFinal')
                         };
-                        console.log('Referência criada manualmente, tentando carregar clientes...');
+                        console.log('Referência Firestore criada manualmente, tentando carregar clientes...');
                         carregarClientes();
                         
                         // Configurar event listeners completos após criar referência manualmente
                         configurarEventListeners();
                     }
+                    // NÃO usar mais Realtime Database, apenas Firestore
+                    else {
+                        console.log('Firestore não está disponível. Tentando inicializar manualmente...');
+                        if (firebase && typeof firebase.firestore === 'function') {
+                            const db = firebase.firestore();
+                            
+                            window.db = db;
+                            window.dbRef = {
+                                clientes: db.collection('clientes'),
+                                fornecedores: db.collection('fornecedores'),
+                                usuarios: db.collection('usuarios'),
+                                separacaoProd: db.collection('SeparacaoProd'),
+                                correcaoFinal: db.collection('CorrecaoFinal')
+                            };
+                            
+                            console.log('Referência Firestore criada manualmente, tentando carregar clientes...');
+                            carregarClientes();
+                            
+                            // Configurar event listeners completos após criar referência manualmente
+                            configurarEventListeners();
+                        }
+                    } else {
+                        throw new Error('Nem Firestore nem Realtime Database estão disponíveis');
+                    }
                 } catch (error) {
                     console.error('Erro ao criar referência manualmente:', error);
+                    alert('Erro ao conectar ao banco de dados. Por favor, recarregue a página e verifique se o script do Firebase está carregado corretamente.');
                 }
             }
         }
@@ -339,8 +369,28 @@ function iniciarCompras(clienteId) {
     // Verificar se dbRef está disponível
     if (!window.dbRef || !window.dbRef.clientes) {
         console.error('dbRef ou dbRef.clientes não está definido!');
-        alert('Erro ao acessar o banco de dados. Por favor, recarregue a página.');
-        return;
+        
+        // Tentar inicializar manualmente se necessário
+        if (window.db) {
+            try {
+                console.log('Tentando criar referência dbRef manualmente usando db...');
+                window.dbRef = {
+                    clientes: window.db.collection('clientes'),
+                    fornecedores: window.db.collection('fornecedores'),
+                    usuarios: window.db.collection('usuarios'),
+                    separacaoProd: window.db.collection('SeparacaoProd'),
+                    correcaoFinal: window.db.collection('CorrecaoFinal')
+                };
+                console.log('Referência dbRef criada manualmente com sucesso');
+            } catch (e) {
+                console.error('Falha ao criar dbRef manualmente:', e);
+                alert('Erro ao acessar o banco de dados. Por favor, recarregue a página.');
+                return;
+            }
+        } else {
+            alert('Erro ao acessar o banco de dados. Por favor, recarregue a página.');
+            return;
+        }
     }
     
     // Atualizar o status do cliente para "Em andamento"

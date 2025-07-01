@@ -46,10 +46,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Tenta criar manualmente a referência como último recurso
                 try {
                     console.log('Tentando criar referência manualmente...');
-                    if (firebase && firebase.database) {
+                    if (firebase && firebase.firestore) {
+                        const db = firebase.firestore();
+                        window.db = db;
                         window.dbRef = {
-                            clientes: firebase.database().ref('clientes'),
-                            projetos: firebase.database().ref('projetos')
+                            clientes: db.collection('clientes'),
+                            fornecedores: db.collection('fornecedores'),
+                            usuarios: db.collection('usuarios'),
+                            separacaoProd: db.collection('SeparacaoProd'),
+                            correcaoFinal: db.collection('CorrecaoFinal')
                         };
                         console.log('Referência criada manualmente, tentando carregar clientes...');
                         carregarClientes();

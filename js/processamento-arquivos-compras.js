@@ -1,119 +1,150 @@
 /**
  * processamento-arquivos-compras.js
+ * Funções para processamento de arquivos e atualizações específicas do módulo de compras
  * 
- * Funções específicas para processamento de compras
- * Este arquivo contém as funções para processamento de compras
- * do Sistema de Controle de Compras e Recebimento
+ * MIGRADO PARA FIRESTORE: Este arquivo agora usa APENAS Firestore
  */
 
 /**
- * Processa a compra dos itens selecionados
- * @param {Array} itensIds - Array com os IDs dos itens selecionados
+ * Atualiza o status de compra dos itens selecionados
  * @param {string} clienteId - ID do cliente
- * @param {string} fornecedor - Nome do fornecedor
- * @param {string} prazoEntrega - Prazo de entrega (formato YYYY-MM-DD)
- * @param {number|null} quantidadePersonalizada - Quantidade personalizada (opcional)
- * @returns {Promise} - Promise que resolve quando a compra for processada
+ * @param {Array} itensIds - IDs dos itens a serem atualizados
+ * @param {string} statusCompra - Novo status de compra
+ * @returns {Promise} - Promise que resolve quando a atualização for concluída
  */
-function processarCompra(itensIds, clienteId, fornecedor, prazoEntrega, quantidadePersonalizada = null) {
+function atualizarStatusCompraItens(clienteId, itensIds, statusCompra) {
+    console.log(`Atualizando status de compra para ${itensIds.length} itens do cliente ${clienteId} para ${statusCompra}`);
+    
     return new Promise((resolve, reject) => {
-        // Referência para o cliente no Firebase
-        const clienteRef = firebase.database().ref(`clientes/${clienteId}`);
+        // Referência para o cliente no Firestore
+        const clienteRef = window.db.collection('clientes').doc(clienteId);
         
         // Busca os dados do cliente
-        clienteRef.once('value')
-            .then((snapshot) => {
-                const cliente = snapshot.val();
-                if (!cliente) {
-                    reject('Cliente não encontrado');
-                    return;
+        clienteRef.get()
+            .then((clienteDoc) => {
+                if (!clienteDoc.exists) {
+                    throw new Error(`Cliente ${clienteId} não encontrado no Firestore`);
                 }
                 
-                // Atualiza cada item selecionado
+                // Objeto para armazenar as atualizações
                 const atualizacoes = {};
                 
-                // Para cada item selecionado
+                // Busca cada item individualmente para obter dados completos
                 const promises = itensIds.map(itemId => {
-                    return firebase.database().ref(`clientes/${clienteId}/itens/${itemId}`).once('value')
+                    // Buscar o item na estrutura do Firestore
+                    // Precisamos primeiro descobrir em qual subcoleção o item está
+                    return window.db.collectionGroup('itens')
+                        .where('id', '==', itemId)
+                        .where('clienteId', '==', clienteId)
+                        .limit(1)
+                        .get()
                         .then((itemSnapshot) => {
-                            const item = itemSnapshot.val();
-                            if (!item) return;
+                            if (itemSnapshot.empty) {
+                                console.warn(`Item ${itemId} não encontrado`);
+                                return;
+                            }
                             
-                            // Define a quantidade comprada
-                            const quantidadeComprada = quantidadePersonalizada || item.necessidade || item.quantidade;
+                            // Pegar o primeiro documento encontrado
+                            const itemDoc = itemSnapshot.docs[0];
+                            const itemData = itemDoc.data();
+                            const itemRef = itemDoc.ref;
                             
-                            // Atualiza o item
-                            atualizacoes[`clientes/${clienteId}/itens/${itemId}/status`] = 'Comprado';
-                            atualizacoes[`clientes/${clienteId}/itens/${itemId}/fornecedor`] = fornecedor;
-                            atualizacoes[`clientes/${clienteId}/itens/${itemId}/prazoEntrega`] = prazoEntrega;
-                            atualizacoes[`clientes/${clienteId}/itens/${itemId}/quantidadeComprada`] = quantidadeComprada;
-                            atualizacoes[`clientes/${clienteId}/itens/${itemId}/dataCompra`] = new Date().toISOString();
+                            // Preparar a atualização
+                            return itemRef.update({
+                                statusCompra: statusCompra,
+                                dataAtualizacaoStatusCompra: firebase.firestore.FieldValue.serverTimestamp(),
+                                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                            });
                         });
                 });
                 
-                // Aguarda todas as consultas de itens
-                return Promise.all(promises).then(() => {
-                    // Atualiza todos os itens de uma vez
-                    return firebase.database().ref().update(atualizacoes);
-                });
+                // Espera todas as atualizações serem concluídas
+                return Promise.all(promises);
             })
             .then(() => {
-                resolve('Compra processada com sucesso');
+                console.log(`Status de compra atualizado com sucesso para ${itensIds.length} itens`);
+                resolve();
             })
             .catch((error) => {
-                console.error('Erro ao processar compra:', error);
-                reject('Erro ao processar compra: ' + error.message);
+                console.error('Erro ao atualizar status de compra:', error);
+                reject(error);
             });
     });
 }
 
 /**
- * Atualiza o prazo de entrega de um item
- * @param {string} itemId - ID do item
+ * Atualiza o prazo de entrega de um item específico
  * @param {string} clienteId - ID do cliente
- * @param {string} novoPrazo - Novo prazo de entrega (formato YYYY-MM-DD)
- * @returns {Promise} - Promise que resolve quando o prazo for atualizado
+ * @param {string} itemId - ID do item a ser atualizado
+ * @param {string} prazoEntrega - Novo prazo de entrega
+ * @returns {Promise} - Promise que resolve quando a atualização for concluída
  */
-function atualizarPrazoEntrega(itemId, clienteId, novoPrazo) {
+function atualizarPrazoEntregaItem(clienteId, itemId, prazoEntrega) {
+    console.log(`Atualizando prazo de entrega do item ${itemId} do cliente ${clienteId} para ${prazoEntrega}`);
+    
     return new Promise((resolve, reject) => {
-        // Referência para o item no Firebase
-        const itemRef = firebase.database().ref(`clientes/${clienteId}/itens/${itemId}`);
-        
-        // Atualiza o prazo de entrega
-        itemRef.update({
-            prazoEntrega: novoPrazo
-        })
-        .then(() => {
-            resolve('Prazo de entrega atualizado com sucesso');
-        })
-        .catch((error) => {
-            console.error('Erro ao atualizar prazo de entrega:', error);
-            reject('Erro ao atualizar prazo de entrega: ' + error.message);
-        });
+        // Referência para o item no Firestore
+        window.db.collectionGroup('itens')
+            .where('id', '==', itemId)
+            .where('clienteId', '==', clienteId)
+            .limit(1)
+            .get()
+            .then((itemSnapshot) => {
+                if (itemSnapshot.empty) {
+                    throw new Error(`Item ${itemId} não encontrado no Firestore`);
+                }
+                
+                // Pegar o primeiro documento encontrado
+                const itemDoc = itemSnapshot.docs[0];
+                const itemRef = itemDoc.ref;
+                
+                // Atualiza o prazo de entrega
+                return itemRef.update({
+                    prazoEntrega: prazoEntrega,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            })
+            .then(() => {
+                console.log(`Prazo de entrega atualizado com sucesso para o item ${itemId}`);
+                resolve();
+            })
+            .catch((error) => {
+                console.error('Erro ao atualizar prazo de entrega:', error);
+                reject(error);
+            });
     });
 }
 
 /**
- * Finaliza o processo de compras para um cliente
+ * Atualiza o status de um cliente
  * @param {string} clienteId - ID do cliente
- * @returns {Promise} - Promise que resolve quando o processo for finalizado
+ * @param {string} statusCliente - Novo status do cliente
+ * @returns {Promise} - Promise que resolve quando a atualização for concluída
  */
-function finalizarCompras(clienteId) {
+function atualizarStatusCliente(clienteId, statusCliente) {
+    console.log(`Atualizando status do cliente ${clienteId} para ${statusCliente}`);
+    
     return new Promise((resolve, reject) => {
-        // Referência para o cliente no Firebase
-        const clienteRef = firebase.database().ref(`clientes/${clienteId}`);
+        // Referência para o cliente no Firestore
+        const clienteRef = window.db.collection('clientes').doc(clienteId);
         
         // Atualiza o status do cliente
         clienteRef.update({
-            status: 'Compras Concluídas',
-            dataFinalizacaoCompras: new Date().toISOString()
+            status: statusCliente,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         })
-        .then(() => {
-            resolve('Processo de compras finalizado com sucesso');
-        })
-        .catch((error) => {
-            console.error('Erro ao finalizar processo de compras:', error);
-            reject('Erro ao finalizar processo de compras: ' + error.message);
-        });
+            .then(() => {
+                console.log(`Status do cliente atualizado com sucesso para ${statusCliente}`);
+                resolve();
+            })
+            .catch((error) => {
+                console.error('Erro ao atualizar status do cliente:', error);
+                reject(error);
+            });
     });
 }
+
+// Exporta as funções para uso em outros arquivos
+window.atualizarStatusCompraItens = atualizarStatusCompraItens;
+window.atualizarPrazoEntregaItem = atualizarPrazoEntregaItem;
+window.atualizarStatusCliente = atualizarStatusCliente;

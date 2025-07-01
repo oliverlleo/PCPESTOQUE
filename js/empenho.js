@@ -43,10 +43,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Tenta criar manualmente a referência como último recurso
                 try {
                     console.log('Tentando criar referência manualmente...');
-                    if (firebase && firebase.database) {
+                    if (firebase && firebase.firestore) {
+                        const db = firebase.firestore();
+                        window.db = db;
                         window.dbRef = {
-                            clientes: firebase.database().ref('clientes'),
-                            projetos: firebase.database().ref('projetos')
+                            clientes: db.collection('clientes'),
+                            fornecedores: db.collection('fornecedores'),
+                            usuarios: db.collection('usuarios'),
+                            separacaoProd: db.collection('SeparacaoProd'),
+                            correcaoFinal: db.collection('CorrecaoFinal')
                         };
                         console.log('Referência criada manualmente, tentando carregar clientes...');
                         carregarClientesElegiveis();
@@ -1061,12 +1066,33 @@ function empenharItemNoFirebase(clienteId, item, quantidade) {
                 throw new Error("Não foi possível determinar o caminho do item no Firebase.");
             }
 
-            if (!firebase || !firebase.database) {
-                 console.error("SDK do Firebase Database não está carregado!");
-                 return reject(new Error("SDK do Firebase Database não está disponível."));
+            if (!firebase || !firebase.firestore) {
+                 console.error("SDK do Firebase Firestore não está carregado!");
+                 return reject(new Error("SDK do Firebase Firestore não está disponível."));
             }
 
-            const itemRef = firebase.database().ref(itemPath);
+            // Converter o caminho do Realtime Database para Firestore
+            const pathParts = itemPath.split('/');
+            if (pathParts.length < 6) {
+                console.error("Caminho inválido para o item:", itemPath);
+                return reject(new Error("Caminho inválido para o item."));
+            }
+
+            // Exemplo: "projetos/clienteId/tipoProjeto/listas/nomeLista/itemId"
+            const clienteId = pathParts[1];
+            const tipoProjeto = pathParts[2];
+            const nomeLista = pathParts[4];
+            const itemId = pathParts[5];
+
+            const itemRef = window.db
+                .collection('clientes')
+                .doc(clienteId)
+                .collection('projetos')
+                .doc(tipoProjeto)
+                .collection('listas')
+                .doc(nomeLista)
+                .collection('itens')
+                .doc(itemId);
             console.log(`Referência Firebase criada: ${itemRef.toString()}`);
 
             // Dados a serem atualizados

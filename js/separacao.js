@@ -1,814 +1,951 @@
-// INÍCIO DO ARQUIVO js/separacao.js
+/**
+ * separacao.js
+ * Módulo responsável pela separação de itens
+ * 
+ * MIGRADO PARA FIRESTORE: Este arquivo agora usa APENAS Firestore
+ */
 
-let tabelaCorrecao = null; // Variável global para a DataTable
+// Inicialização e configuração global
+let tabelaSeparacao;
+let modalConfirmacao;
+let modalDetalhes;
+let clienteSelecionado = "";
+let tipoProjetoSelecionado = "";
+let nomeListaOriginalSelecionada = "";
+let dadosListaSelecionada = {};
+let clientesData = {};
 
-document.addEventListener("DOMContentLoaded", () => {
-    console.log("DOM completamente carregado.");
-
-    // Verifica se Select2 está disponível antes de tentar usá-lo
-    if (typeof $ !== "undefined" && $.fn && $.fn.select2) {
-        $("#selectCliente, #selectTipoProjeto, #selectLista").select2({
-            placeholder: "Selecione uma opção",
-            allowClear: true,
-            width: "100%",
-        });
-    }
-
-    // --- INÍCIO: Lógica dos Selects ---
+// Inicialização dos componentes ao carregar o documento
+document.addEventListener("DOMContentLoaded", function () {
+    console.log("Inicializando separacao.js...");
+    
+    inicializarComponentes();
     carregarClientes();
-    document.getElementById("selectCliente").addEventListener("change", () => {
-        limparSelectHTML("selectTipoProjeto", "Selecione um Tipo de Projeto");
-        limparSelectHTML("selectLista", "Selecione uma Lista");
-        if (tabelaCorrecao) tabelaCorrecao.clear().draw();
-        carregarTiposProjeto();
-    });
-    document.getElementById("selectTipoProjeto").addEventListener("change", () => {
-        limparSelectHTML("selectLista", "Selecione uma Lista");
-        if (tabelaCorrecao) tabelaCorrecao.clear().draw();
-        carregarListas();
-    });
-
-    // MODIFICADO: Listener para selectLista agora tenta carregar dados salvos
-    document.getElementById("selectLista").addEventListener("change", async () => {
-        const clienteId = document.getElementById("selectCliente").value;
-        const tipoProjeto = document.getElementById("selectTipoProjeto").value;
-        const nomeListaOriginal = document.getElementById("selectLista").value;
-
-        if (tabelaCorrecao) tabelaCorrecao.clear().draw(); // Limpa a tabela ao mudar a lista
-
-        if (clienteId && tipoProjeto && nomeListaOriginal) {
-            // Tenta carregar a CorrecaoFinal existente para esta seleção
-            await buscarECarregarCorrecaoFinal(clienteId, tipoProjeto, nomeListaOriginal);
-        } 
-    });
-    // --- FIM: Lógica dos Selects ---
-
-    document.getElementById("btnGerar").addEventListener("click", gerarSeparacao);
-
-    // --- Nova Funcionalidade: Gerar Necessidade de Compra ---
-    const btnGerarNecessidade = document.getElementById("btnGerarNecessidade");
-    const modalNecessidadeCompra = new bootstrap.Modal(document.getElementById("modalNecessidadeCompra"));
-
-    if (btnGerarNecessidade) {
-        console.log("Botão btnGerarNecessidade encontrado.");
-        btnGerarNecessidade.addEventListener("click", async () => {
-            console.log("Botão Gerar Necessidade de Compra clicado.");
-            const clienteId = document.getElementById("selectCliente").value;
-            const tipoProjeto = document.getElementById("selectTipoProjeto").value;
-            const nomeListaOriginal = document.getElementById("selectLista").value;
-
-            if (!clienteId || !tipoProjeto || !nomeListaOriginal) {
-                if (typeof mostrarNotificacao === "function") {
-                    mostrarNotificacao("Por favor, selecione Cliente, Tipo de Projeto e Lista Original antes de gerar a necessidade de compra.", "warning");
-                }
-                console.warn("Seleções incompletas para gerar necessidade de compra.");
-                return;
-            }
-
-            try {
-                const refCorrecaoFinal = firebase.database().ref(`CorrecaoFinal/${clienteId}/${tipoProjeto}/${nomeListaOriginal}/itensProcessados`);
-                const snapshot = await refCorrecaoFinal.once("value");
-                const itensProcessados = snapshot.val() || [];
-
-                const itensParaCompra = itensProcessados.filter(item => item.quantidadeCompraAdicional > 0);
-
-                const tbodyModal = document.querySelector("#tabelaNecessidadeCompra tbody");
-                tbodyModal.innerHTML = ""; // Limpa a tabela do modal
-
-                let hasProcessedItems = false; // Flag para verificar se há itens já processados
-
-                if (itensParaCompra.length > 0) {
-                    itensParaCompra.forEach((item, index) => {
-                        const row = tbodyModal.insertRow();
-                        // Preenche os campos com os valores existentes e os torna somente leitura se já tiverem valor
-                        const qtdCompraFinalValue = item.qtdCompraFinal || 0;
-                        const qtdUsadaEstoqueValue = item.qtdUsadaEstoque || 0;
-                        const fonteEstoqueValue = item.fonteEstoque || "";
-                        const fornecedorValue = item.fornecedor || ""; // Novo campo fornecedor
-
-                        const readonlyQtdCompraFinal = qtdCompraFinalValue > 0 ? "readonly" : "";
-                        const readonlyQtdUsadaEstoque = qtdUsadaEstoqueValue > 0 ? "readonly" : "";
-                        const readonlyFonteEstoque = fonteEstoqueValue !== "" ? "readonly" : "";
-                        const readonlyFornecedor = fornecedorValue !== "" ? "readonly" : ""; // Readonly para fornecedor
-
-                        row.innerHTML = `
-                            <td><input type="checkbox" class="check-item-necessidade" data-index="${index}"></td>
-                            <td>${item.codigo || ""}</td>
-                            <td>${item.descricao || ""}</td>
-                            <td>${item.quantidadeCompraAdicional || 0}</td>
-                            <td><input type="number" class="form-control form-control-sm" value="${qtdCompraFinalValue}" min="0" data-field="qtdCompraFinal" ${readonlyQtdCompraFinal}></td>
-                            <td><input type="number" class="form-control form-control-sm" value="${qtdUsadaEstoqueValue}" min="0" data-field="qtdUsadaEstoque" ${readonlyQtdUsadaEstoque}></td>
-                            <td><input type="text" class="form-control form-control-sm" value="${fonteEstoqueValue}" data-field="fonteEstoque" ${readonlyFonteEstoque}></td>
-                            <td><input type="text" class="form-control form-control-sm" value="${fornecedorValue}" data-field="fornecedor" ${readonlyFornecedor}></td>
-                        `;
-                        if (qtdCompraFinalValue > 0 || qtdUsadaEstoqueValue > 0 || fornecedorValue !== "") { // Atualiza a condição
-                            hasProcessedItems = true;
-                        }
-                    });
-                    modalNecessidadeCompra.show();
-                    console.log("Modal de necessidade de compra exibido.");
-
-                    // Exibe o botão de download do Excel se houver itens já processados
-                    if (hasProcessedItems) {
-                        document.getElementById("btnDownloadExcelModal").style.display = "block";
-                    } else {
-                        document.getElementById("btnDownloadExcelModal").style.display = "none";
-                    }
-
-                } else {
-                    if (typeof mostrarNotificacao === "function") {
-                        mostrarNotificacao("Nenhum item com necessidade de compra adicional encontrado.", "info");
-                    }
-                    console.log("Nenhum item com quantidadeCompraAdicional > 0.");
-                    document.getElementById("btnDownloadExcelModal").style.display = "none"; // Garante que o botão esteja oculto
-                }
-            } catch (error) {
-                console.error("Erro ao carregar itens para necessidade de compra:", error);
-                if (typeof mostrarNotificacao === "function") {
-                    mostrarNotificacao("Erro ao carregar itens para necessidade de compra.", "danger");
-                }
-            }
-        });
-    } else {
-        console.error("Botão btnGerarNecessidade não encontrado.");
-    }
-
-    // Event listener para o botão de confirmar ação no modal
-    document.getElementById("btnConfirmarNecessidade").addEventListener("click", async () => {
-        console.log("Botão Confirmar Ação clicado.");
-        const clienteId = document.getElementById("selectCliente").value;
-        const tipoProjeto = document.getElementById("selectTipoProjeto").value;
-        const nomeListaOriginal = document.getElementById("selectLista").value;
-
-        if (!clienteId || !tipoProjeto || !nomeListaOriginal) {
-            if (typeof mostrarNotificacao === "function") {
-                mostrarNotificacao("Erro: Seleções de Cliente, Tipo de Projeto ou Lista Original ausentes.", "danger");
-            }
-            console.error("Seleções incompletas para confirmar necessidade de compra.");
-            return;
-        }
-
-        try {
-            const refCorrecaoFinal = firebase.database().ref(`CorrecaoFinal/${clienteId}/${tipoProjeto}/${nomeListaOriginal}/itensProcessados`);
-            const snapshot = await refCorrecaoFinal.once("value");
-            let itensProcessados = snapshot.val() || [];
-
-            const linhasModal = document.querySelectorAll("#tabelaNecessidadeCompra tbody tr");
-
-            linhasModal.forEach(linha => {
-                const checkbox = linha.querySelector(".check-item-necessidade");
-                if (checkbox && checkbox.checked) {
-                    const index = parseInt(checkbox.dataset.index);
-                    const itemOriginal = itensProcessados[index];
-
-                    if (itemOriginal) {
-                        const qtdCompraFinal = parseFloat(linha.querySelector("[data-field=\'qtdCompraFinal\']").value) || 0;
-                        const qtdUsadaEstoque = parseFloat(linha.querySelector("[data-field=\'qtdUsadaEstoque\']").value) || 0;
-                        const fonteEstoque = linha.querySelector("[data-field=\'fonteEstoque\']").value.trim();
-                        const fornecedor = linha.querySelector("[data-field=\'fornecedor\']").value.trim(); // Novo campo fornecedor
-
-                        itemOriginal.qtdCompraFinal = qtdCompraFinal;
-                        itemOriginal.qtdUsadaEstoque = qtdUsadaEstoque;
-                        itemOriginal.fonteEstoque = fonteEstoque;
-                        itemOriginal.fornecedor = fornecedor; // Salva o fornecedor
-                    }
-                }
-            });
-
-            console.log("Itens a serem salvos no Firebase (com novos campos):", itensProcessados);
-            await refCorrecaoFinal.set(itensProcessados); // Salva a lista completa de volta
-
-            if (typeof mostrarNotificacao === "function") {
-                mostrarNotificacao("Necessidade de compra e retirada de estoque salvas com sucesso!", "success");
-            }
-            console.log("Dados de necessidade de compra salvos no Firebase.");
-
-            // Mostra o botão de download do Excel dentro do modal após a confirmação
-            document.getElementById("btnDownloadExcelModal").style.display = "block";
-
-            // Atualizar a tabela principal (tabelaCorrecao)
-            await buscarECarregarCorrecaoFinal(clienteId, tipoProjeto, nomeListaOriginal); // Recarrega os dados para atualizar a tabela
-
-        } catch (error) {
-            console.error("Erro ao confirmar necessidade de compra:", error);
-            if (typeof mostrarNotificacao === "function") {
-                mostrarNotificacao("Erro ao salvar necessidade de compra.", "danger");
-            }
-        }
-    });
-
-    // Novo Event listener para o botão de download do Excel dentro do modal
-    document.getElementById("btnDownloadExcelModal").addEventListener("click", async () => {
-        console.log("Botão Download Excel (Modal) clicado.");
-        const clienteId = document.getElementById("selectCliente").value;
-        const tipoProjeto = document.getElementById("selectTipoProjeto").value;
-        const nomeListaOriginal = document.getElementById("selectLista").value;
-
-        if (!clienteId || !tipoProjeto || !nomeListaOriginal) {
-            if (typeof mostrarNotificacao === "function") {
-                mostrarNotificacao("Por favor, selecione Cliente, Tipo de Projeto e Lista Original antes de gerar o Excel.", "warning");
-            }
-            console.warn("Seleções incompletas para gerar Excel.");
-            return;
-        }
-
-        try {
-            const refCorrecaoFinal = firebase.database().ref(`CorrecaoFinal/${clienteId}/${tipoProjeto}/${nomeListaOriginal}/itensProcessados`);
-            const snapshot = await refCorrecaoFinal.once("value");
-            const itensProcessados = snapshot.val() || [];
-
-            const dadosExcel = itensProcessados.filter(item => item.qtdCompraFinal > 0 || item.qtdUsadaEstoque > 0).map(item => ({
-                Código: item.codigo,
-                Descrição: item.descricao,
-                Qtd: item.qtdCompraFinal,
-                EmpenhoEstoque: item.qtdUsadaEstoque,
-                Local: item.fonteEstoque,
-                Fornecedor: item.fornecedor || "" // Inclui o fornecedor no Excel
-            }));
-
-            if (dadosExcel.length > 0) {
-                const ws = XLSX.utils.json_to_sheet(dadosExcel);
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "Necessidade de Compra");
-                XLSX.writeFile(wb, "Necessidade_de_Compra.xlsx");
-                if (typeof mostrarNotificacao === "function") {
-                    mostrarNotificacao("Arquivo Excel gerado com sucesso!", "success");
-                }
-                console.log("Arquivo Excel gerado.");
-            } else {
-                if (typeof mostrarNotificacao === "function") {
-                    mostrarNotificacao("Nenhum item com quantidade de compra ou retirada preenchida para gerar o Excel.", "info");
-                }
-                console.log("Nenhum item com quantidade de compra ou retirada preenchida para gerar Excel.");
-            }
-        } catch (error) {
-            console.error("Erro ao gerar Excel:", error);
-            if (typeof mostrarNotificacao === "function") {
-                mostrarNotificacao("Erro ao gerar o arquivo Excel.", "danger");
-            }
-        }
-    });
-
-    // Listener para o checkbox "checkTodosNecessidade"
-    document.getElementById("checkTodosNecessidade").addEventListener("change", (event) => {
-        const isChecked = event.target.checked;
-        document.querySelectorAll(".check-item-necessidade").forEach(checkbox => {
-            checkbox.checked = isChecked;
-        });
-        console.log("Checkbox \'Selecionar Todos\' alterado.");
-    });
-
-    // Inicializa DataTable
-    if (typeof $ !== "undefined" && $.fn && $.fn.DataTable) {
-        if (!$.fn.DataTable.isDataTable("#tabelaCorrecao")) {
-            tabelaCorrecao = $("#tabelaCorrecao").DataTable({
-                // responsive: true, // Removido temporariamente para teste
-                // nowrap: true, // Removido temporariamente para teste
-                language: { url: "https://cdn.datatables.net/plug-ins/1.11.5/i18n/pt-BR.json" },
-                columns: [
-                    { title: "Detalhes", className: "dt-control", orderable: false, data: null, defaultContent: 
-'<i class="fas fa-plus-circle text-primary"></i>'
-, width: "15px" },
-                    { title: "Código", data: "codigo" },
-                    { title: "Descrição", data: "descricao" },
-                    { title: "Qtd. Desejada", data: "quantidadeDesejadaSeparacao" },
-                    { title: "Qtd. Disponível", data: "quantidadeDisponivelOriginal" },
-                    { title: "Qtd. a Separar", data: "quantidadeParaSepararReal" },
-                    { title: "Qtd. Compra", data: "quantidadeCompraAdicional" },
-                    { title: "Qtd. Devolução", data: "quantidadeDevolucaoEstoque" },
-                    { title: "Qtd Compra", data: "qtdCompraFinal", defaultContent: "0" },
-                    { title: "Qtd Estoque", data: "qtdUsadaEstoque", defaultContent: "0" },
-                    { title: "Local", data: "fonteEstoque", defaultContent: "" },
-                    { title: "Status", data: "statusComparacao" },
-                ],
-                data: [],
-                order: [[1, "asc"]],
-            });
+    
+    // Configurar eventos
+    document.getElementById("btnSalvarSeparacao").addEventListener("click", () => salvarSeparacao());
+    document.getElementById("btnExportar").addEventListener("click", exportarTabelaExcel);
+    
+    // Listener para alterações no cliente selecionado
+    document.getElementById("selectCliente").addEventListener("change", function () {
+        clienteSelecionado = this.value;
+        if (clienteSelecionado) {
+            document.getElementById("selectTipoProjeto").disabled = false;
+            carregarTiposProjeto(clienteSelecionado);
         } else {
-            tabelaCorrecao = $("#tabelaCorrecao").DataTable();
+            document.getElementById("selectTipoProjeto").disabled = true;
+            document.getElementById("selectTipoProjeto").innerHTML = '<option value="">Selecione...</option>';
+            document.getElementById("selectListaOriginal").disabled = true;
+            document.getElementById("selectListaOriginal").innerHTML = '<option value="">Selecione...</option>';
         }
-
-        $("#tabelaCorrecao tbody").on("click", "td.dt-control", function (event) {
-            event.stopPropagation();
-            var tr = $(this).closest("tr");
-            var row = tabelaCorrecao.row(tr);
-            if (row.child.isShown()) {
-                row.child.hide();
-                tr.removeClass("shown");
-                $(this).html(
-'<i class="fas fa-plus-circle text-primary"></i>'
-);
-            } else {
-                const rowData = row.data();
-                if (rowData) {
-                    row.child(formatarDetalhes(rowData)).show();
-                    tr.addClass("shown");
-                    $(this).html(
-'<i class="fas fa-minus-circle text-danger"></i>'
-);
-                }
-            }
-        });
-    } else {
-        console.error("jQuery ou DataTables não estão carregados. A tabela não pode ser inicializada.");
-    }
+    });
+    
+    // Listener para alterações no tipo de projeto selecionado
+    document.getElementById("selectTipoProjeto").addEventListener("change", function () {
+        tipoProjetoSelecionado = this.value;
+        if (tipoProjetoSelecionado) {
+            document.getElementById("selectListaOriginal").disabled = false;
+            carregarListasOriginais(clienteSelecionado, tipoProjetoSelecionado);
+        } else {
+            document.getElementById("selectListaOriginal").disabled = true;
+            document.getElementById("selectListaOriginal").innerHTML = '<option value="">Selecione...</option>';
+        }
+    });
+    
+    // Listener para alterações na lista original selecionada
+    document.getElementById("selectListaOriginal").addEventListener("change", function () {
+        nomeListaOriginalSelecionada = this.value;
+        if (nomeListaOriginalSelecionada) {
+            document.getElementById("btnCarregarLista").disabled = false;
+        } else {
+            document.getElementById("btnCarregarLista").disabled = true;
+        }
+    });
+    
+    // Listener para o botão de carregar lista
+    document.getElementById("btnCarregarLista").addEventListener("click", () => 
+        carregarListaSeparacao(clienteSelecionado, tipoProjetoSelecionado, nomeListaOriginalSelecionada)
+    );
 });
 
-// Função auxiliar para limpar selects
-function limparSelectHTML(selectId, placeholderText = "Selecione") {
-    const select = document.getElementById(selectId);
-    if (select) {
-        select.innerHTML = `<option value="">${placeholderText}</option>`;
-        if (typeof $ !== "undefined" && $.fn && $.fn.select2 && $(select).data("select2")) {
-            $(select).val(null).trigger("change");
+/**
+ * Verifica se uma lista já foi processada
+ */
+async function verificarListaProcessada(clienteId, tipoProjeto, nomeListaOriginal) {
+    console.log(`Verificando se a lista já foi processada: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
+    
+    return new Promise(async (resolve, reject) => {
+        if (!clienteId || !tipoProjeto || !nomeListaOriginal) {
+            console.error("Parâmetros inválidos para verificarListaProcessada");
+            return resolve(false);
         }
-    }
+
+        try {
+            // Usar Firestore em vez de Realtime Database
+            const refCorrecaoFinal = window.db
+                .collection('CorrecaoFinal')
+                .doc(clienteId)
+                .collection(tipoProjeto)
+                .doc(nomeListaOriginal)
+                .collection('itensProcessados');
+                
+            const snapshot = await refCorrecaoFinal.limit(1).get();
+            const itensProcessados = !snapshot.empty;
+            
+            console.log(`Lista processada? ${itensProcessados}`);
+            resolve(itensProcessados);
+        } catch (error) {
+            console.error("Erro ao verificar lista processada:", error);
+            resolve(false);
+        }
+    });
 }
 
-// --- Funções Originais para Carregar Selects (mantidas) ---
-function carregarClientes() {
-    const sel = document.getElementById("selectCliente");
-    sel.innerHTML = 
-'<option value="">Selecione</option>'
-;
-
-    const clientesRef = firebase.database().ref("clientes");
-
-    clientesRef
-        .once("value")
-        .then((snap) => {
-            snap.forEach((child) => {
-                const opt = document.createElement("option");
-                opt.value = child.key;
-                const clienteData = child.val();
-                opt.textContent = clienteData.nome_razao_social || clienteData.nome || child.key;
-                sel.appendChild(opt);
+/**
+ * Formata os dados para exibição na tabela
+ */
+async function formatarDadosParaTabela(dados, clienteId, tipoProjeto, nomeListaOriginal) {
+    console.log("Formatando dados para tabela de separação");
+    
+    return new Promise(async (resolve, reject) => {
+        try {
+            // Usar Firestore em vez de Realtime Database
+            const refCorrecaoFinal = window.db
+                .collection('CorrecaoFinal')
+                .doc(clienteId)
+                .collection(tipoProjeto)
+                .doc(nomeListaOriginal)
+                .collection('itensProcessados');
+                
+            const snapshot = await refCorrecaoFinal.get();
+            let itensProcessados = [];
+            
+            snapshot.forEach(doc => {
+                itensProcessados.push(doc.data());
             });
-            if (typeof $ !== "undefined" && $.fn && $.fn.select2 && $(sel).data("select2")) {
-                $(sel).trigger("change");
-            }
-        })
-        .catch((err) => {
-            console.error("Erro ao carregar clientes:", err);
-            if (typeof mostrarNotificacao === "function") mostrarNotificacao("Falha ao carregar clientes.", "danger");
-        });
-}
-
-function carregarTiposProjeto() {
-    const clienteId = document.getElementById("selectCliente").value;
-    const sel = document.getElementById("selectTipoProjeto");
-
-    if (!clienteId) return;
-
-    firebase
-        .database()
-        .ref(`projetos/${clienteId}`)
-        .once("value")
-        .then((snap) => {
-            const dados = snap.val() || {};
-            let tiposAdicionados = 0;
-            Object.keys(dados).forEach((tipo) => {
-                if (typeof dados[tipo] === "object" && dados[tipo] !== null && dados[tipo].hasOwnProperty("listas")) {
-                    const opt = document.createElement("option");
-                    opt.value = tipo;
-                    opt.textContent = tipo;
-                    sel.appendChild(opt);
-                    tiposAdicionados++;
-                }
-            });
-            if (tiposAdicionados === 0) {
-                if (Object.keys(dados).length > 0) {
-                    if (typeof mostrarNotificacao === "function")
-                        mostrarNotificacao("Nenhum tipo de projeto com estrutura de \'listas\' encontrado para este cliente.", "info");
-                } else {
-                    if (typeof mostrarNotificacao === "function") mostrarNotificacao("Nenhum tipo de projeto encontrado para este cliente.", "info");
-                }
-            }
-            if (typeof $ !== "undefined" && $.fn && $.fn.select2 && $(sel).data("select2")) {
-                $(sel).trigger("change");
-            }
-        })
-        .catch((err) => {
-            console.error("Erro ao carregar tipos de projeto:", err);
-            if (typeof mostrarNotificacao === "function") mostrarNotificacao("Falha ao carregar tipos de projeto.", "danger");
-        });
-}
-
-async function carregarListas() {
-    const clienteId = document.getElementById("selectCliente").value;
-    const tipo = document.getElementById("selectTipoProjeto").value;
-    const sel = document.getElementById("selectLista");
-
-    sel.innerHTML = 
-'<option value="">Selecione uma Lista</option>'
-; // Limpa sempre
-
-    if (!clienteId || !tipo) {
-        if (typeof $ !== "undefined" && $.fn && $.fn.select2 && $(sel).data("select2")) {
-            $(sel).trigger("change");
-        }
-        return;
-    }
-
-    try {
-        const refListasRoot = firebase.database().ref(`projetos/${clienteId}/${tipo}/listas`);
-        const snapshotListas = await refListasRoot.once("value");
-
-        if (!snapshotListas.exists()) {
-            if (typeof mostrarNotificacao === "function")
-                mostrarNotificacao(`Nenhuma lista encontrada em \'projetos/${clienteId}/${tipo}/listas\'.`, "info");
-            if (typeof $ !== "undefined" && $.fn && $.fn.select2 && $(sel).data("select2")) {
-                $(sel).trigger("change");
-            }
-            return;
-        }
-
-        let algumaListaElegivelAdicionada = false;
-        snapshotListas.forEach((listSnap) => {
-            const nomeLista = listSnap.key;
-            const itensDaLista = listSnap.val() || {};
-            const arrayDeItens = Array.isArray(itensDaLista)
-                ? itensDaLista
-                : typeof itensDaLista === "object" && itensDaLista !== null
-                ? Object.values(itensDaLista)
-                : [];
-
-            const elegivel = arrayDeItens.some(
-                (it) => it && ((parseFloat(it.empenho || 0) > 0) || (parseFloat(it.quantidadeRecebida || 0) > 0))
-            );
-
-            if (elegivel) {
-                const opt = document.createElement("option");
-                opt.value = nomeLista;
-                opt.textContent = nomeLista;
-                sel.appendChild(opt);
-                algumaListaElegivelAdicionada = true;
-            }
-        });
-
-        if (!algumaListaElegivelAdicionada) {
-            if (typeof mostrarNotificacao === "function")
-                mostrarNotificacao("Nenhuma lista elegível (com itens empenhados/recebidos) encontrada.", "info");
-        }
-
-        if (typeof $ !== "undefined" && $.fn && $.fn.select2 && $(sel).data("select2")) {
-            $(sel).trigger("change");
-        }
-    } catch (err) {
-        console.error("Erro ao carregar listas:", err);
-        if (typeof mostrarNotificacao === "function") mostrarNotificacao("Falha ao carregar listas de material.", "danger");
-        if (typeof $ !== "undefined" && $.fn && $.fn.select2 && $(sel).data("select2")) {
-            $(sel).trigger("change");
-        }
-    }
-}
-// --- FIM DAS FUNÇÕES PARA CARREGAR SELECTS ---
-
-// Função para formatar os detalhes (colunas ocultas)
-function formatarDetalhes(d) {
-    return `<div class="p-3 bg-light border rounded">
-        <dl class="row mb-0">
-            <dt class="col-sm-3">Altura:</dt>
-            <dd class="col-sm-9">${d.altura || "N/A"}</dd>
-            <dt class="col-sm-3">Largura:</dt>
-            <dd class="col-sm-9">${d.largura || "N/A"}</dd>
-            <dt class="col-sm-3">Medida:</dt>
-            <dd class="col-sm-9">${d.medida || "N/A"}</dd>
-            <dt class="col-sm-3">Cor:</dt>
-            <dd class="col-sm-9">${d.cor || "N/A"}</dd>
-            <dt class="col-sm-3">Observação:</dt>
-            <dd class="col-sm-9">${d.observacao || "N/A"}</dd>
-        </dl>
-    </div>`;
-}
-
-// Processa o arquivo de separação e salva em SeparacaoProd
-async function processarArquivoInputSeparacao(arquivo, clienteId, tipoProjeto, nomeListaOriginal) {
-    return new Promise((resolve, reject) => {
-        if (!arquivo) {
-            return reject(new Error("Nenhum arquivo selecionado."));
-        }
-        const tipoArquivo = obterTipoArquivo(arquivo.name);
-        if (!tipoArquivo) {
-            return reject(new Error("Formato de arquivo não suportado."));
-        }
-
-        const reader = new FileReader();
-        reader.onload = async function (e) {
-            try {
-                let itensProcessados;
-                switch (tipoArquivo) {
-                    case "csv":
-                        itensProcessados = processarCSV(e.target.result);
-                        break;
-                    case "xlsx":
-                        // Lembre-se que processarXLSX pode precisar de biblioteca externa (SheetJS)
-                        itensProcessados = await processarXLSX(e.target.result);
-                        break;
-                    case "xml":
-                        itensProcessados = processarXML(e.target.result);
-                        break;
-                    default:
-                        throw new Error("Tipo de arquivo inesperado após verificação inicial.");
-                }
-
-                if (!itensProcessados || itensProcessados.length === 0) {
-                    throw new Error("Nenhum item válido encontrado no arquivo.");
-                }
-
-                // Mapeia para garantir campos de detalhe e formata quantidade
-                const itensFormatados = itensProcessados
-                    .map((item) => ({
-                        codigo: String(item.codigo || "N/A").trim(), // Garante string e remove espaços
-                        descricao: item.descricao || "Sem descrição",
-                        quantidade: parseFloat(item.quantidade) || 0,
-                        altura: item.altura || "",
-                        largura: item.largura || "",
-                        medida: item.medida || "",
-                        cor: item.cor || "",
-                        observacao: item.observacao || "",
-                    }))
-                    .filter((item) => item.quantidade > 0); // Filtra itens com quantidade inválida ou zero
-
-                if (itensFormatados.length === 0) {
-                    throw new Error("Nenhum item com quantidade válida encontrado após formatação.");
-                }
-
-                // Salva no Firebase em SeparacaoProd
-                const refSeparacaoProd = firebase.database().ref(`SeparacaoProd/${clienteId}/${tipoProjeto}/${nomeListaOriginal}/itens`);
-                await refSeparacaoProd.set(itensFormatados);
-                resolve(itensFormatados); // Retorna os itens salvos
-            } catch (err) {
-                console.error("Erro dentro do reader.onload:", err);
-                reject(err);
-            }
-        };
-        reader.onerror = function (e) {
-            console.error("Erro ao ler o arquivo:", e);
-            reject(new Error("Falha ao ler o arquivo."));
-        };
-
-        // Lê o arquivo conforme o tipo
-        if (tipoArquivo === "xlsx") {
-            reader.readAsArrayBuffer(arquivo);
-        } else {
-            reader.readAsText(arquivo);
-        }
-    });
-}
-
-// Compara as listas e salva em CorrecaoFinal
-async function compararListas(clienteId, tipoProjeto, nomeListaOriginal) {
-    if (!clienteId || !tipoProjeto || !nomeListaOriginal) {
-        throw new Error("Seleções incompletas para comparação.");
-    }
-
-    if (typeof mostrarNotificacao === "function") mostrarNotificacao("Iniciando comparação de listas...", "info");
-
-    // 1. Buscar Lista Original (com empenho/recebido)
-    const refOrig = firebase.database().ref(`projetos/${clienteId}/${tipoProjeto}/listas/${nomeListaOriginal}/itens`);
-    const snapOrig = await refOrig.once("value");
-    const listaOriginalItensRaw = snapOrig.exists() ? snapOrig.val() : {};
-    const mapListaOriginal = new Map();
-    const listaOriginalItens = Array.isArray(listaOriginalItensRaw)
-        ? listaOriginalItensRaw
-        : typeof listaOriginalItensRaw === "object" && listaOriginalItensRaw !== null
-        ? Object.values(listaOriginalItensRaw)
-        : [];
-
-    listaOriginalItens.forEach((item) => {
-        if (item && item.codigo) {
-            const codigo = String(item.codigo).trim();
-            const quantidadeDisponivelOriginal = (parseFloat(item.empenho) || 0) + (parseFloat(item.quantidadeRecebida) || 0);
-            mapListaOriginal.set(codigo, { ...item, quantidadeDisponivelOriginal });
-        }
-    });
-
-    // 2. Buscar Nova Lista de Separação (recém salva)
-    const refSep = firebase.database().ref(`SeparacaoProd/${clienteId}/${tipoProjeto}/${nomeListaOriginal}/itens`);
-    const snapSep = await refSep.once("value");
-    const listaSeparacaoItensRaw = snapSep.exists() ? snapSep.val() : {};
-    const mapListaSeparacao = new Map();
-    const listaSeparacaoItens = Array.isArray(listaSeparacaoItensRaw)
-        ? listaSeparacaoItensRaw
-        : typeof listaSeparacaoItensRaw === "object" && listaSeparacaoItensRaw !== null
-        ? Object.values(listaSeparacaoItensRaw)
-        : [];
-
-    listaSeparacaoItens.forEach((item) => {
-        if (item && item.codigo) {
-            mapListaSeparacao.set(String(item.codigo).trim(), item);
-        }
-    });
-
-    const itensProcessados = [];
-
-    // Processar itens da lista de separação
-    for (const [codigo, itemSeparacao] of mapListaSeparacao) {
-        const itemOriginal = mapListaOriginal.get(codigo);
-        let statusComparacao = "";
-        let quantidadeParaSepararReal = 0;
-        let quantidadeCompraAdicional = 0;
-        let quantidadeDevolucaoEstoque = 0;
-        const quantidadeDesejadaSeparacao = itemSeparacao.quantidade || 0;
-        const quantidadeDisponivelOriginal = itemOriginal ? itemOriginal.quantidadeDisponivelOriginal : 0;
-
-        if (itemOriginal) {
-            // Item existe na lista original
-            if (quantidadeDesejadaSeparacao <= quantidadeDisponivelOriginal) {
-                statusComparacao = "Item OK";
-                quantidadeParaSepararReal = quantidadeDesejadaSeparacao;
-            } else {
-                statusComparacao = "Comprar Adicional";
-                quantidadeParaSepararReal = quantidadeDisponivelOriginal;
-                quantidadeCompraAdicional = quantidadeDesejadaSeparacao - quantidadeDisponivelOriginal;
-            }
-        } else {
-            // Item novo, não existe na lista original
-            statusComparacao = "Item Novo";
-            quantidadeCompraAdicional = quantidadeDesejadaSeparacao;
-        }
-
-        itensProcessados.push({
-            ...itemSeparacao, // Mantém todos os campos do item de separação
-            quantidadeDesejadaSeparacao: quantidadeDesejadaSeparacao,
-            quantidadeDisponivelOriginal: quantidadeDisponivelOriginal,
-            quantidadeParaSepararReal: quantidadeParaSepararReal,
-            quantidadeCompraAdicional: quantidadeCompraAdicional,
-            quantidadeDevolucaoEstoque: quantidadeDevolucaoEstoque, // Inicializa como 0
-            statusComparacao: statusComparacao,
-        });
-    }
-
-    // Processar itens da lista original que não estão na lista de separação
-    for (const [codigo, itemOriginal] of mapListaOriginal) {
-        if (!mapListaSeparacao.has(codigo)) {
-            // Item existe na lista original mas não na de separação, deve ser devolvido ao estoque
-            const quantidadeDevolucao = itemOriginal.quantidadeDisponivelOriginal;
-            if (quantidadeDevolucao > 0) {
-                itensProcessados.push({
-                    ...itemOriginal,
-                    quantidadeDesejadaSeparacao: 0,
-                    quantidadeParaSepararReal: 0,
-                    quantidadeCompraAdicional: 0,
-                    quantidadeDevolucaoEstoque: quantidadeDevolucao,
-                    statusComparacao: "Devolver ao Estoque",
+            
+            console.log(`Itens processados encontrados: ${itensProcessados.length}`);
+            
+            const dadosFormatados = [];
+            
+            for (const item of Object.values(dados)) {
+                if (!item) continue;
+                
+                // Verifica se o item já foi processado
+                const itemProcessado = itensProcessados.find(i => i.id === item.id);
+                
+                // Adiciona as informações necessárias para a tabela
+                dadosFormatados.push({
+                    id: item.id,
+                    descricao: item.descricao || '-',
+                    codigoMaterial: item.codigoMaterial || '-',
+                    quantidade: item.quantidade || 0,
+                    unidade: item.unidade || '-',
+                    quantidadeSeparada: item.quantidade || 0,
+                    status: itemProcessado ? 'Processado' : 'Pendente',
+                    itemOriginal: item
                 });
             }
+            
+            resolve(dadosFormatados);
+        } catch (error) {
+            console.error("Erro ao formatar dados para tabela:", error);
+            reject(error);
         }
-    }
-
-    // Salvar o resultado da comparação em CorrecaoFinal
-    const refCorrecaoFinal = firebase.database().ref(`CorrecaoFinal/${clienteId}/${tipoProjeto}/${nomeListaOriginal}/itensProcessados`);
-    await refCorrecaoFinal.set(itensProcessados);
-
-    if (typeof mostrarNotificacao === "function") mostrarNotificacao("Comparação de listas concluída e salva em CorrecaoFinal.", "success");
-    return itensProcessados;
-}
-
-// Função para buscar e carregar dados de CorrecaoFinal na tabela
-async function buscarECarregarCorrecaoFinal(clienteId, tipoProjeto, nomeListaOriginal) {
-    if (!clienteId || !tipoProjeto || !nomeListaOriginal) {
-        console.warn("Seleções incompletas para buscar CorrecaoFinal.");
-        if (tabelaCorrecao) tabelaCorrecao.clear().draw();
-        return;
-    }
-
-    try {
-        const refCorrecaoFinal = firebase.database().ref(`CorrecaoFinal/${clienteId}/${tipoProjeto}/${nomeListaOriginal}/itensProcessados`);
-        const snapshot = await refCorrecaoFinal.once("value");
-        const itens = snapshot.val() || [];
-
-        console.log("Dados recuperados do Firebase para tabelaCorrecao:", itens);
-        // --- NOVO LOG DE DEBUG --- //
-        itens.forEach((item, index) => {
-            console.log(`Item ${index}: fonteEstoque = ${item.fonteEstoque}, qtdCompraFinal = ${item.qtdCompraFinal}, qtdUsadaEstoque = ${item.qtdUsadaEstoque}`);
-        });
-        // --- FIM DO NOVO LOG DE DEBUG --- //
-
-        if (tabelaCorrecao) {
-            tabelaCorrecao.clear().rows.add(itens).draw();
-        }
-
-        // Esconde o botão de download do Excel fora do modal, se ele existir
-        const btnDownloadExcelMain = document.getElementById("btnDownloadExcel");
-        if (btnDownloadExcelMain) {
-            btnDownloadExcelMain.style.display = "none";
-        }
-
-        if (itens.length === 0) {
-            if (typeof mostrarNotificacao === "function") mostrarNotificacao("Nenhum dado encontrado para CorrecaoFinal com as seleções atuais.", "info");
-        }
-    } catch (error) {
-        console.error("Erro ao buscar e carregar CorrecaoFinal:", error);
-        if (typeof mostrarNotificacao === "function") {
-            mostrarNotificacao("Erro ao carregar dados de CorrecaoFinal.", "danger");
-        }
-    }
-}
-
-// Função principal para gerar a separação
-async function gerarSeparacao() {
-    const clienteId = document.getElementById("selectCliente").value;
-    const tipoProjeto = document.getElementById("selectTipoProjeto").value;
-    const nomeListaOriginal = document.getElementById("selectLista").value;
-    const inputArquivo = document.getElementById("inputArquivo");
-    const arquivo = inputArquivo.files[0];
-
-    if (!clienteId || !tipoProjeto || !nomeListaOriginal || !arquivo) {
-        if (typeof mostrarNotificacao === "function") {
-            mostrarNotificacao("Por favor, preencha todos os campos e selecione um arquivo.", "warning");
-        }
-        return;
-    }
-
-    if (typeof mostrarNotificacao === "function") mostrarNotificacao("Processando arquivo e comparando listas...", "info");
-
-    try {
-        // 1. Processar o arquivo de separação e salvar em SeparacaoProd
-        await processarArquivoInputSeparacao(arquivo, clienteId, tipoProjeto, nomeListaOriginal);
-
-        // 2. Comparar as listas e salvar em CorrecaoFinal
-        const itensCorrecaoFinal = await compararListas(clienteId, tipoProjeto, nomeListaOriginal);
-
-        // 3. Carregar os dados na tabela
-        if (tabelaCorrecao) {
-            tabelaCorrecao.clear().rows.add(itensCorrecaoFinal).draw();
-        }
-
-        if (typeof mostrarNotificacao === "function") mostrarNotificacao("Separação gerada com sucesso!", "success");
-    } catch (error) {
-        console.error("Erro ao gerar separação:", error);
-        if (typeof mostrarNotificacao === "function") mostrarNotificacao(`Erro ao gerar separação: ${error.message}`, "danger");
-    }
-}
-
-// --- Funções Auxiliares para Processamento de Arquivos (mantidas) ---
-function obterTipoArquivo(nomeArquivo) {
-    const ext = nomeArquivo.split(".").pop().toLowerCase();
-    if (["csv"].includes(ext)) return "csv";
-    if (["xlsx", "xls"].includes(ext)) return "xlsx";
-    if (["xml"].includes(ext)) return "xml";
-    return null;
-}
-
-function processarCSV(conteudo) {
-    const linhas = conteudo.split(/\r\n|\n/).filter(line => line.trim() !== "");
-    const cabecalho = linhas[0].split(";").map(h => h.trim());
-    const dados = [];
-
-    for (let i = 1; i < linhas.length; i++) {
-        const valores = linhas[i].split(";");
-        let item = {};
-        cabecalho.forEach((col, index) => {
-            item[col] = valores[index] ? valores[index].trim() : "";
-        });
-        dados.push(item);
-    }
-    return dados;
-}
-
-async function processarXLSX(data) {
-    const workbook = XLSX.read(data, { type: "array" });
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-    const json = XLSX.utils.sheet_to_json(worksheet);
-
-    // Mapear para garantir que os nomes das colunas correspondem ao esperado
-    return json.map(row => ({
-        codigo: row["Código"] || row["CODIGO"] || "",
-        descricao: row["Descrição"] || row["DESCRICAO"] || "",
-        quantidade: parseFloat(row["Quantidade"]) || parseFloat(row["QUANTIDADE"]) || 0,
-        altura: row["Altura"] || row["ALTURA"] || "",
-        largura: row["Largura"] || row["LARGURA"] || "",
-        medida: row["Medida"] || row["MEDIDA"] || "",
-        cor: row["Cor"] || row["COR"] || "",
-        observacao: row["Observação"] || row["OBSERVACAO"] || ""
-    }));
-}
-
-function processarXML(conteudo) {
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(conteudo, "text/xml");
-    const itens = [];
-    const itemNodes = xmlDoc.querySelectorAll("item"); // Supondo que cada item esteja em uma tag <item>
-
-    itemNodes.forEach(node => {
-        const item = {};
-        // Exemplo: extrair dados de tags filhas
-        item.codigo = node.querySelector("codigo")?.textContent || "";
-        item.descricao = node.querySelector("descricao")?.textContent || "";
-        item.quantidade = parseFloat(node.querySelector("quantidade")?.textContent) || 0;
-        item.altura = node.querySelector("altura")?.textContent || "";
-        item.largura = node.querySelector("largura")?.textContent || "";
-        item.medida = node.querySelector("medida")?.textContent || "";
-        item.cor = node.querySelector("cor")?.textContent || "";
-        item.observacao = node.querySelector("observacao")?.textContent || "";
-        itens.push(item);
     });
-    return itens;
 }
 
-// FIM DO ARQUIVO js/separacao.js
+/**
+ * Obtém e formata itens que já estão na correção final
+ */
+async function obterItensSeparacao(clienteId, tipoProjeto, nomeListaOriginal) {
+    console.log(`Obtendo itens de separação: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
+    
+    return new Promise(async (resolve, reject) => {
+        try {
+            // Usar Firestore em vez de Realtime Database
+            const refCorrecaoFinal = window.db
+                .collection('CorrecaoFinal')
+                .doc(clienteId)
+                .collection(tipoProjeto)
+                .doc(nomeListaOriginal)
+                .collection('itensProcessados');
+                
+            const snapshot = await refCorrecaoFinal.get();
+            let itensProcessados = [];
+            
+            snapshot.forEach(doc => {
+                itensProcessados.push(doc.data());
+            });
+            
+            console.log(`Itens já processados: ${itensProcessados.length}`);
+            resolve(itensProcessados);
+        } catch (error) {
+            console.error("Erro ao obter itens de separação:", error);
+            reject(error);
+        }
+    });
+}
 
+/**
+ * Atualiza o item na correção final
+ */
+async function atualizarItemCorrecaoFinal(item, clienteId, tipoProjeto, nomeListaOriginal) {
+    console.log("Atualizando item na correção final:", item.id);
+    
+    return new Promise(async (resolve, reject) => {
+        try {
+            // Usar Firestore em vez de Realtime Database
+            const refCorrecaoFinal = window.db
+                .collection('CorrecaoFinal')
+                .doc(clienteId)
+                .collection(tipoProjeto)
+                .doc(nomeListaOriginal)
+                .collection('itensProcessados');
+                
+            const snapshot = await refCorrecaoFinal.get();
+            let itensProcessados = [];
+            
+            snapshot.forEach(doc => {
+                itensProcessados.push({
+                    id: doc.id,
+                    ...doc.data()
+                });
+            });
+            
+            // Adiciona ou atualiza o item
+            const itemIndex = itensProcessados.findIndex(i => i.id === item.id);
+            
+            if (itemIndex !== -1) {
+                // Atualiza o item existente
+                await refCorrecaoFinal.doc(item.id).update({
+                    ...item,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            } else {
+                // Adiciona novo item
+                await refCorrecaoFinal.doc(item.id).set({
+                    ...item,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+            
+            console.log("Item atualizado com sucesso na correção final");
+            resolve(true);
+        } catch (error) {
+            console.error("Erro ao atualizar item na correção final:", error);
+            reject(error);
+        }
+    });
+}
 
+/**
+ * Carrega os clientes do Firestore
+ */
+function carregarClientes() {
+    console.log("Carregando clientes do Firestore...");
+    
+    // Usar Firestore em vez de Realtime Database
+    const clientesRef = window.db.collection("clientes");
+
+    clientesRef
+        .get()
+        .then(snapshot => {
+            const selectCliente = document.getElementById("selectCliente");
+            selectCliente.innerHTML = '<option value="">Selecione...</option>';
+            
+            clientesData = {}; // Limpar dados anteriores
+            
+            if (snapshot.empty) {
+                console.log("Nenhum cliente encontrado");
+                return;
+            }
+            
+            snapshot.forEach(doc => {
+                const cliente = doc.data();
+                const clienteId = doc.id;
+                
+                clientesData[clienteId] = cliente;
+                
+                const option = document.createElement("option");
+                option.value = clienteId;
+                option.textContent = cliente.nome || clienteId;
+                selectCliente.appendChild(option);
+            });
+            
+            console.log(`${snapshot.size} clientes carregados`);
+        })
+        .catch(error => {
+            console.error("Erro ao carregar clientes:", error);
+            mostrarNotificacao("Erro ao carregar clientes", "danger");
+        });
+}
+
+/**
+ * Carrega os tipos de projeto do cliente selecionado
+ */
+async function carregarTiposProjeto(clienteId) {
+    console.log(`Carregando tipos de projeto para cliente: ${clienteId}`);
+    
+    const selectTipoProjeto = document.getElementById("selectTipoProjeto");
+    selectTipoProjeto.innerHTML = '<option value="">Selecione...</option>';
+    
+    try {
+        // Usar Firestore em vez de Realtime Database
+        const projetosRef = window.db
+            .collection("clientes")
+            .doc(clienteId)
+            .collection("projetos");
+            
+        const snapshot = await projetosRef.get();
+        
+        if (snapshot.empty) {
+            console.log("Nenhum tipo de projeto encontrado");
+            return;
+        }
+        
+        snapshot.forEach(doc => {
+            const tipoProjeto = doc.id;
+            
+            const option = document.createElement("option");
+            option.value = tipoProjeto;
+            option.textContent = tipoProjeto.charAt(0).toUpperCase() + tipoProjeto.slice(1);
+            selectTipoProjeto.appendChild(option);
+        });
+        
+        console.log(`${snapshot.size} tipos de projeto carregados`);
+    } catch (error) {
+        console.error("Erro ao carregar tipos de projeto:", error);
+        mostrarNotificacao("Erro ao carregar tipos de projeto", "danger");
+    }
+}
+
+/**
+ * Carrega as listas originais para o cliente e tipo de projeto selecionados
+ */
+async function carregarListasOriginais(clienteId, tipo) {
+    console.log(`Carregando listas para cliente: ${clienteId}, tipo: ${tipo}`);
+    
+    const selectListaOriginal = document.getElementById("selectListaOriginal");
+    selectListaOriginal.innerHTML = '<option value="">Selecione...</option>';
+    
+    try {
+        // Usar Firestore em vez de Realtime Database
+        const refListasRoot = window.db
+            .collection("clientes")
+            .doc(clienteId)
+            .collection("projetos")
+            .doc(tipo)
+            .collection("listas");
+            
+        const snapshotListas = await refListasRoot.get();
+        
+        if (snapshotListas.empty) {
+            console.log("Nenhuma lista encontrada");
+            return;
+        }
+        
+        snapshotListas.forEach(doc => {
+            const nomeLista = doc.id;
+            
+            const option = document.createElement("option");
+            option.value = nomeLista;
+            option.textContent = nomeLista;
+            selectListaOriginal.appendChild(option);
+        });
+        
+        console.log(`${snapshotListas.size} listas originais carregadas`);
+    } catch (error) {
+        console.error("Erro ao carregar listas:", error);
+        mostrarNotificacao("Erro ao carregar listas", "danger");
+    }
+}
+
+/**
+ * Carrega os itens da lista selecionada para separação
+ */
+async function carregarListaSeparacao(clienteId, tipoProjeto, nomeListaOriginal) {
+    console.log(`Carregando lista para separação: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
+    
+    if (!clienteId || !tipoProjeto || !nomeListaOriginal) {
+        mostrarNotificacao("Selecione cliente, tipo de projeto e lista", "warning");
+        return;
+    }
+    
+    // Mostrar loading
+    mostrarLoading(true);
+    
+    try {
+        // Verifica se já existe uma lista de separação salva
+        const listaProcessada = await verificarListaProcessada(clienteId, tipoProjeto, nomeListaOriginal);
+        
+        if (listaProcessada) {
+            await carregarListaProcessada(clienteId, tipoProjeto, nomeListaOriginal);
+        } else {
+            await carregarListaOriginal(clienteId, tipoProjeto, nomeListaOriginal);
+        }
+        
+        // Atualiza os botões de ação
+        document.getElementById("btnSalvarSeparacao").disabled = false;
+        document.getElementById("btnExportar").disabled = false;
+        
+        // Esconde o loading
+        mostrarLoading(false);
+    } catch (error) {
+        console.error("Erro ao carregar lista para separação:", error);
+        mostrarNotificacao("Erro ao carregar lista para separação", "danger");
+        mostrarLoading(false);
+    }
+}
+
+/**
+ * Carrega uma lista já processada
+ */
+async function carregarListaProcessada(clienteId, tipoProjeto, nomeListaOriginal) {
+    console.log(`Carregando lista já processada: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
+    
+    try {
+        // Buscar itens da lista original no Firestore
+        const itensOriginaisRef = window.db
+            .collection("clientes")
+            .doc(clienteId)
+            .collection("projetos")
+            .doc(tipoProjeto)
+            .collection("listas")
+            .doc(nomeListaOriginal)
+            .collection("itens");
+            
+        const itensOriginaisSnapshot = await itensOriginaisRef.get();
+        
+        if (itensOriginaisSnapshot.empty) {
+            console.log("Nenhum item encontrado na lista original");
+            mostrarNotificacao("Nenhum item encontrado na lista original", "warning");
+            return;
+        }
+        
+        // Converter snapshot para objeto
+        const itensOriginais = {};
+        itensOriginaisSnapshot.forEach(doc => {
+            itensOriginais[doc.id] = {
+                id: doc.id,
+                ...doc.data()
+            };
+        });
+        
+        // Buscar itens da lista de separação no Firestore
+        const itensSeparacaoRef = window.db
+            .collection("SeparacaoProd")
+            .doc(clienteId)
+            .collection(tipoProjeto)
+            .doc(nomeListaOriginal)
+            .collection("itens");
+            
+        const itensSeparacaoSnapshot = await itensSeparacaoRef.get();
+        
+        // Converter snapshot para objeto
+        const itensSeparacao = {};
+        itensSeparacaoSnapshot.forEach(doc => {
+            itensSeparacao[doc.id] = {
+                id: doc.id,
+                ...doc.data()
+            };
+        });
+        
+        // Mesclar dados originais com dados de separação
+        const dadosMesclados = {};
+        
+        for (const [itemId, itemOriginal] of Object.entries(itensOriginais)) {
+            dadosMesclados[itemId] = {
+                ...itemOriginal,
+                quantidadeSeparada: itensSeparacao[itemId]?.quantidadeSeparada || itemOriginal.quantidade || 0
+            };
+        }
+        
+        // Formatar dados para tabela e renderizar
+        const dadosFormatados = await formatarDadosParaTabela(
+            dadosMesclados,
+            clienteId,
+            tipoProjeto,
+            nomeListaOriginal
+        );
+        
+        renderizarTabelaSeparacao(dadosFormatados);
+        dadosListaSelecionada = dadosFormatados;
+        
+        console.log(`Lista processada carregada com ${dadosFormatados.length} itens`);
+        mostrarNotificacao(`Lista já processada carregada com ${dadosFormatados.length} itens`, "success");
+    } catch (error) {
+        console.error("Erro ao carregar lista processada:", error);
+        mostrarNotificacao("Erro ao carregar lista processada", "danger");
+    }
+}
+
+/**
+ * Carrega uma lista original (ainda não processada)
+ */
+async function carregarListaOriginal(clienteId, tipoProjeto, nomeListaOriginal) {
+    console.log(`Carregando lista original: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
+    
+    try {
+        // Buscar itens da lista original no Firestore
+        const itensRef = window.db
+            .collection("clientes")
+            .doc(clienteId)
+            .collection("projetos")
+            .doc(tipoProjeto)
+            .collection("listas")
+            .doc(nomeListaOriginal)
+            .collection("itens");
+            
+        const snapshot = await itensRef.get();
+        
+        if (snapshot.empty) {
+            console.log("Nenhum item encontrado na lista original");
+            mostrarNotificacao("Nenhum item encontrado na lista original", "warning");
+            return;
+        }
+        
+        // Converter snapshot para objeto
+        const itens = {};
+        snapshot.forEach(doc => {
+            itens[doc.id] = {
+                id: doc.id,
+                ...doc.data()
+            };
+        });
+        
+        // Formatar dados para tabela e renderizar
+        const dadosFormatados = await formatarDadosParaTabela(
+            itens,
+            clienteId,
+            tipoProjeto,
+            nomeListaOriginal
+        );
+        
+        renderizarTabelaSeparacao(dadosFormatados);
+        dadosListaSelecionada = dadosFormatados;
+        
+        console.log(`Lista original carregada com ${dadosFormatados.length} itens`);
+        mostrarNotificacao(`Lista original carregada com ${dadosFormatados.length} itens`, "success");
+    } catch (error) {
+        console.error("Erro ao carregar lista original:", error);
+        mostrarNotificacao("Erro ao carregar lista original", "danger");
+    }
+}
+
+/**
+ * Salva os dados da separação
+ */
+async function salvarSeparacao() {
+    console.log("Salvando separação...");
+    
+    if (!clienteSelecionado || !tipoProjetoSelecionado || !nomeListaOriginalSelecionada) {
+        mostrarNotificacao("Selecione cliente, tipo de projeto e lista", "warning");
+        return;
+    }
+    
+    if (tabelaSeparacao) {
+        mostrarLoading(true);
+        
+        try {
+            // Obter dados da tabela
+            const dados = tabelaSeparacao.data();
+            
+            if (!dados || dados.length === 0) {
+                mostrarNotificacao("Nenhum item para salvar", "warning");
+                mostrarLoading(false);
+                return;
+            }
+            
+            // Formatar itens para salvar no Firestore
+            const itensFormatados = {};
+            
+            dados.forEach(item => {
+                itensFormatados[item.id] = {
+                    id: item.id,
+                    descricao: item.descricao,
+                    codigoMaterial: item.codigoMaterial,
+                    quantidade: item.quantidade,
+                    unidade: item.unidade,
+                    quantidadeSeparada: item.quantidadeSeparada,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                };
+            });
+            
+            // Salvar no Firestore em SeparacaoProd
+            const separacaoProdRef = window.db
+                .collection("SeparacaoProd")
+                .doc(clienteSelecionado)
+                .collection(tipoProjetoSelecionado)
+                .doc(nomeListaOriginalSelecionada);
+                
+            await separacaoProdRef.set({
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                status: "separado"
+            });
+            
+            // Salvar os itens em uma subcoleção
+            const itensRef = separacaoProdRef.collection("itens");
+            
+            // Usar batch para salvar múltiplos documentos
+            const batch = window.db.batch();
+            
+            for (const [itemId, itemData] of Object.entries(itensFormatados)) {
+                const docRef = itensRef.doc(itemId);
+                batch.set(docRef, itemData);
+            }
+            
+            await batch.commit();
+            
+            // Processamento adicional - comparar listas e criar correção final
+            await processarResultadoSeparacao(
+                clienteSelecionado,
+                tipoProjetoSelecionado, 
+                nomeListaOriginalSelecionada
+            );
+            
+            mostrarNotificacao("Separação salva com sucesso", "success");
+            mostrarLoading(false);
+        } catch (error) {
+            console.error("Erro ao salvar separação:", error);
+            mostrarNotificacao("Erro ao salvar separação", "danger");
+            mostrarLoading(false);
+        }
+    } else {
+        mostrarNotificacao("Nenhum item para salvar", "warning");
+    }
+}
+
+/**
+ * Processa o resultado da separação
+ */
+async function processarResultadoSeparacao(clienteId, tipoProjeto, nomeListaOriginal) {
+    console.log(`Processando resultado da separação: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
+    
+    // 1. Buscar Lista Original (com empenho/recebido)
+    const origRef = window.db
+        .collection("clientes")
+        .doc(clienteId)
+        .collection("projetos")
+        .doc(tipoProjeto)
+        .collection("listas")
+        .doc(nomeListaOriginal)
+        .collection("itens");
+        
+    const origSnapshot = await origRef.get();
+    
+    if (origSnapshot.empty) {
+        console.log("Nenhum item encontrado na lista original");
+        return;
+    }
+    
+    // Converter snapshot para objeto
+    const listaOriginalItens = {};
+    origSnapshot.forEach(doc => {
+        listaOriginalItens[doc.id] = {
+            id: doc.id,
+            ...doc.data()
+        };
+    });
+    
+    // 2. Buscar Nova Lista de Separação (recém salva)
+    const sepRef = window.db
+        .collection("SeparacaoProd")
+        .doc(clienteId)
+        .collection(tipoProjeto)
+        .doc(nomeListaOriginal)
+        .collection("itens");
+        
+    const sepSnapshot = await sepRef.get();
+    
+    if (sepSnapshot.empty) {
+        console.log("Nenhum item encontrado na lista de separação");
+        return;
+    }
+    
+    // Converter snapshot para objeto
+    const listaSeparacaoItens = {};
+    sepSnapshot.forEach(doc => {
+        listaSeparacaoItens[doc.id] = {
+            id: doc.id,
+            ...doc.data()
+        };
+    });
+    
+    // 3. Comparar as duas listas e criar itens processados
+    const itensProcessados = [];
+    
+    for (const [itemId, itemOriginal] of Object.entries(listaOriginalItens)) {
+        const itemSeparacao = listaSeparacaoItens[itemId];
+        
+        if (!itemSeparacao) continue;
+        
+        const quantidadeOriginal = itemOriginal.quantidade || 0;
+        const quantidadeSeparada = itemSeparacao.quantidadeSeparada || 0;
+        const quantidadeEmpenhada = itemOriginal.quantidadeEmpenhada || 0;
+        const quantidadeRecebida = itemOriginal.quantidadeRecebida || 0;
+        
+        let status = "OK";
+        let diferenca = 0;
+        
+        // Verificar diferenças
+        if (quantidadeSeparada < quantidadeOriginal) {
+            status = "PARCIAL";
+            diferenca = quantidadeOriginal - quantidadeSeparada;
+        } else if (quantidadeSeparada > quantidadeOriginal) {
+            status = "EXCESSO";
+            diferenca = quantidadeSeparada - quantidadeOriginal;
+        }
+        
+        // Adicionar ao array de itens processados
+        itensProcessados.push({
+            id: itemId,
+            descricao: itemOriginal.descricao || "",
+            codigoMaterial: itemOriginal.codigoMaterial || "",
+            quantidade: quantidadeOriginal,
+            unidade: itemOriginal.unidade || "",
+            quantidadeSeparada: quantidadeSeparada,
+            quantidadeEmpenhada: quantidadeEmpenhada,
+            quantidadeRecebida: quantidadeRecebida,
+            diferenca: diferenca,
+            status: status,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    }
+    
+    // Salvar o resultado da comparação em CorrecaoFinal
+    const correcaoFinalRef = window.db
+        .collection("CorrecaoFinal")
+        .doc(clienteId)
+        .collection(tipoProjeto)
+        .doc(nomeListaOriginal);
+        
+    await correcaoFinalRef.set({
+        status: "processado",
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    
+    // Salvar os itens processados em uma subcoleção
+    const itensProcessadosRef = correcaoFinalRef.collection("itensProcessados");
+    
+    // Usar batch para salvar múltiplos documentos
+    const batch = window.db.batch();
+    
+    for (const item of itensProcessados) {
+        const docRef = itensProcessadosRef.doc(item.id);
+        batch.set(docRef, item);
+    }
+    
+    await batch.commit();
+    
+    console.log(`Processamento finalizado com ${itensProcessados.length} itens`);
+}
+
+/**
+ * Carrega e exibe o relatório de correção final
+ */
+async function carregarRelatorioCorrecaoFinal(clienteId, tipoProjeto, nomeListaOriginal) {
+    console.log(`Carregando relatório de correção final: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
+    
+    try {
+        const correcaoFinalRef = window.db
+            .collection("CorrecaoFinal")
+            .doc(clienteId)
+            .collection(tipoProjeto)
+            .doc(nomeListaOriginal)
+            .collection("itensProcessados");
+            
+        const snapshot = await correcaoFinalRef.get();
+        
+        if (snapshot.empty) {
+            console.log("Nenhum item encontrado no relatório de correção final");
+            return [];
+        }
+        
+        const itens = [];
+        snapshot.forEach(doc => {
+            itens.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        console.log(`Relatório carregado com ${itens.length} itens`);
+        return itens;
+    } catch (error) {
+        console.error("Erro ao carregar relatório de correção final:", error);
+        return [];
+    }
+}
+
+/**
+ * Inicializa os componentes da página
+ */
+function inicializarComponentes() {
+    console.log("Inicializando componentes da página");
+    
+    // Inicializa modais
+    modalConfirmacao = new bootstrap.Modal(document.getElementById("modalConfirmacao"));
+    modalDetalhes = new bootstrap.Modal(document.getElementById("modalDetalhes"));
+    
+    // Configura os botões
+    document.getElementById("btnSalvarSeparacao").disabled = true;
+    document.getElementById("btnExportar").disabled = true;
+    document.getElementById("btnCarregarLista").disabled = true;
+    document.getElementById("selectTipoProjeto").disabled = true;
+    document.getElementById("selectListaOriginal").disabled = true;
+}
+
+/**
+ * Renderiza a tabela de separação
+ */
+function renderizarTabelaSeparacao(dados) {
+    console.log(`Renderizando tabela de separação com ${dados.length} itens`);
+    
+    const tabelaContainer = document.getElementById("tabelaSeparacao");
+    
+    // Destrói a tabela existente se houver
+    if (tabelaSeparacao) {
+        tabelaSeparacao.destroy();
+    }
+    
+    // Inicializa a nova tabela
+    tabelaSeparacao = new DataTable("#tabelaSeparacao", {
+        data: dados,
+        columns: [
+            { data: "id", title: "ID" },
+            { data: "descricao", title: "Descrição" },
+            { data: "codigoMaterial", title: "Código Material" },
+            { data: "quantidade", title: "Quantidade Original" },
+            { data: "unidade", title: "Unidade" },
+            { 
+                data: "quantidadeSeparada", 
+                title: "Quantidade Separada",
+                render: function(data, type, row) {
+                    if (type === "display") {
+                        return `<input type="number" class="form-control form-control-sm input-quantidade-separada" 
+                                value="${data}" min="0" data-id="${row.id}">`;
+                    }
+                    return data;
+                }
+            },
+            { data: "status", title: "Status" }
+        ],
+        language: {
+            url: "//cdn.datatables.net/plug-ins/1.11.5/i18n/pt-BR.json"
+        },
+        responsive: true,
+        ordering: true,
+        paging: true,
+        searching: true,
+        info: true
+    });
+    
+    // Adiciona evento para atualizar os dados quando a quantidade separada for alterada
+    tabelaContainer.addEventListener("change", function(e) {
+        if (e.target.classList.contains("input-quantidade-separada")) {
+            const itemId = e.target.dataset.id;
+            const novaQuantidade = parseFloat(e.target.value) || 0;
+            
+            // Atualiza os dados na tabela
+            const dadosTabela = tabelaSeparacao.data();
+            
+            for (let i = 0; i < dadosTabela.length; i++) {
+                if (dadosTabela[i].id === itemId) {
+                    dadosTabela[i].quantidadeSeparada = novaQuantidade;
+                    tabelaSeparacao.row(i).data(dadosTabela[i]).draw(false);
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/**
+ * Exporta a tabela para Excel
+ */
+function exportarTabelaExcel() {
+    console.log("Exportando tabela para Excel");
+    
+    if (!tabelaSeparacao) {
+        mostrarNotificacao("Nenhum dado para exportar", "warning");
+        return;
+    }
+    
+    try {
+        const dados = tabelaSeparacao.data();
+        
+        if (!dados || dados.length === 0) {
+            mostrarNotificacao("Nenhum dado para exportar", "warning");
+            return;
+        }
+        
+        // Formatar dados para Excel
+        const dadosExcel = dados.map(item => ({
+            ID: item.id,
+            Descricao: item.descricao,
+            CodigoMaterial: item.codigoMaterial,
+            QuantidadeOriginal: item.quantidade,
+            Unidade: item.unidade,
+            QuantidadeSeparada: item.quantidadeSeparada,
+            Status: item.status
+        }));
+        
+        // Criar workbook e worksheet
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(dadosExcel);
+        
+        // Adicionar worksheet ao workbook
+        XLSX.utils.book_append_sheet(wb, ws, "Separacao");
+        
+        // Nome do arquivo
+        const nomeArquivo = `Separacao_${clienteSelecionado}_${tipoProjetoSelecionado}_${nomeListaOriginalSelecionada}.xlsx`;
+        
+        // Exportar
+        XLSX.writeFile(wb, nomeArquivo);
+        
+        mostrarNotificacao("Exportação concluída com sucesso", "success");
+    } catch (error) {
+        console.error("Erro ao exportar para Excel:", error);
+        mostrarNotificacao("Erro ao exportar para Excel", "danger");
+    }
+}
+
+/**
+ * Mostra ou esconde o loading
+ */
+function mostrarLoading(mostrar) {
+    const loading = document.getElementById("loading");
+    
+    if (mostrar) {
+        loading.style.display = "flex";
+    } else {
+        loading.style.display = "none";
+    }
+}
+
+/**
+ * Mostra uma notificação na página
+ */
+function mostrarNotificacao(mensagem, tipo, tempo = 5000) {
+    const notificacao = document.createElement("div");
+    notificacao.className = `alert alert-${tipo} alert-dismissible fade show notification`;
+    notificacao.innerHTML = `
+        ${mensagem}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
+    `;
+    
+    document.body.appendChild(notificacao);
+    
+    setTimeout(() => {
+        notificacao.classList.add("show");
+    }, 100);
+    
+    setTimeout(() => {
+        notificacao.classList.remove("show");
+        setTimeout(() => {
+            notificacao.remove();
+        }, 500);
+    }, tempo);
+}

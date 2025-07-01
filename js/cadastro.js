@@ -213,8 +213,21 @@ function carregarClientes() {
   // Limpa a tabela
   tabelaClientes.innerHTML = "";
 
+  // Verifica se a referência dbRef está disponível
+  if (!window.dbRef || !window.dbRef.clientes) {
+    console.error("dbRef ou dbRef.clientes não disponível");
+    nenhumCliente.classList.remove("d-none");
+    nenhumCliente.innerHTML = `
+      <div class="alert alert-danger">
+        <i class="fas fa-exclamation-triangle"></i>
+        Erro ao conectar com o banco de dados. Por favor, recarregue a página.
+      </div>
+    `;
+    return;
+  }
+
   // Busca os clientes no Firebase
-  dbRef.clientes
+  window.dbRef.clientes
     .once("value")
     .then((snapshot) => {
       const clientes = snapshot.val();
@@ -673,9 +686,45 @@ async function salvarCadastro() {
       projetosParaSalvar[tipo] = tipoProjeto;
     });
 
-    // 3. Salva os dados do cliente e os projetos usando 'update'
-    await dbRef.clientes.child(clienteId).update(clienteData);
-    await dbRef.projetos.child(clienteId).update(projetosParaSalvar);
+    // 3. Salva os dados do cliente e os projetos usando métodos do Firestore
+    // Verifica se o documento existe antes de fazer update, senão usa set
+    try {
+      const clienteDoc = await window.db.collection('clientes').doc(clienteId).get();
+      if (clienteDoc.exists) {
+        await window.db.collection('clientes').doc(clienteId).update({
+          ...clienteData,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      } else {
+        await window.db.collection('clientes').doc(clienteId).set({
+          ...clienteData,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      
+      // Salva projetos na subcoleção
+      for (const [tipo, dados] of Object.entries(projetosParaSalvar)) {
+        const projetoRef = window.db.collection('clientes').doc(clienteId).collection('projetos').doc(tipo);
+        const projetoDoc = await projetoRef.get();
+        
+        if (projetoDoc.exists) {
+          await projetoRef.update({
+            ...dados,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        } else {
+          await projetoRef.set({
+            ...dados,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao salvar no Firestore:", error);
+      throw error;
+    }
 
     // *** FIM DA CORREÇÃO LÓGICA ***
 
