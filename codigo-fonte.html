@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador de Código-Fonte</title>
+    <link rel="icon" href="assets/img/logo.png" type="image/png">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/default.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        .file-tree {
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .file-item {
+            cursor: pointer;
+            transition: background-color 0.2s;
+            padding: 5px;
+            border-radius: 4px;
+        }
+        .file-item:hover {
+            background-color: #f0f0f0;
+        }
+        .folder-item {
+            font-weight: bold;
+        }
+        .code-viewer {
+            height: 80vh;
+            overflow-y: auto;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .code-content {
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            white-space: pre;
+        }
+        .hljs {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .tree-indent {
+            margin-left: 20px;
+        }
+        .img-preview {
+            max-width: 100%;
+            max-height: 500px;
+            display: block;
+            margin: 0 auto;
+        }
+        #breadcrumb {
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+        /* Estilo para notificações */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            transition: all 0.3s ease;
+        }
+        /* Estilo para barra de progresso durante download */
+        .progress-bar-container {
+            height: 4px;
+            width: 100%;
+            background-color: #f5f5f5;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 9999;
+        }
+        .progress-bar {
+            height: 100%;
+            background-color: #007bff;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
+<script src="https://lib.youware.com/youware-lib.1747145198.js" id="yourware-lib"></script></head>
+<body>
+    <header class="bg-dark text-white py-3">
+        <div class="container">
+            <div class="d-flex align-items-center">
+                <a href="index.html" class="text-white text-decoration-none me-3">
+                    <i class="fas fa-arrow-left"></i> Voltar
+                </a>
+                <h1 class="mb-0">Visualizador de Código-Fonte</h1>
+            </div>
+        </div>
+    </header>
+
+    <main class="container-fluid my-4">
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h2 class="card-title">Sistema de Controle de Compras e Recebimento</h2>
+                            <button id="download-btn" class="btn btn-primary">
+                                <i class="fas fa-download"></i> Baixar Todo o Projeto
+                            </button>
+                        </div>
+                        <p class="card-text">Visualize e baixe o código-fonte completo do sistema.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-3">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-light">
+                        <h3 class="card-title h5 mb-0">Estrutura de Arquivos</h3>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="file-tree" class="file-tree p-2"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-9">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-light">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <nav aria-label="breadcrumb">
+                                    <ol id="breadcrumb" class="breadcrumb mb-0"></ol>
+                                </nav>
+                            </div>
+                            <div>
+                                <button id="copy-btn" class="btn btn-sm btn-secondary me-2" disabled>
+                                    <i class="fas fa-copy"></i> Copiar
+                                </button>
+                                <button id="download-file-btn" class="btn btn-sm btn-info text-white" disabled>
+                                    <i class="fas fa-download"></i> Baixar Arquivo
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="code-viewer" class="code-viewer">
+                            <div id="code-content" class="code-content">
+                                <div class="text-center py-5">
+                                    <i class="fas fa-code fa-5x text-muted mb-3"></i>
+                                    <h3>Selecione um arquivo para visualizar seu conteúdo</h3>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="bg-dark text-white py-3 mt-5">
+        <div class="container">
+            <p class="mb-0 text-center">&copy; 2025 Sistema de Controle de Compras e Recebimento</p>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    
+    <!-- Scripts individuais para melhor compatibilidade -->
+    <script src="js/codigo-fonte/file-system.js"></script>
+    <script src="js/codigo-fonte/file-utils.js"></script>
+    <script src="js/codigo-fonte/file-viewer.js"></script>
+    
+    <script>
+        // Inicialização quando a página carregar
+        document.addEventListener('DOMContentLoaded', () => {
+            // Inicia o visualizador de arquivos
+            initFileViewer();
+            
+            // Mostra mensagem inicial
+            showNotification('Bem-vindo ao Visualizador de Código! Selecione um arquivo para visualizar.', 'info', 3000);
+            
+            // Adiciona detecção de arquivos em tempo real
+            // (Função fictícia para representar a detecção de novos arquivos, seria implementada
+            // com um serviço de backend real em um sistema completo)
+            setInterval(() => {
+                // Em um sistema real, aqui verificaria se novos arquivos foram adicionados ao projeto
+                // e atualizaria a estrutura do fileSystem
+            }, 30000); // Verifica a cada 30 segundos
+        });
+    </script>
+</body>
+</html>

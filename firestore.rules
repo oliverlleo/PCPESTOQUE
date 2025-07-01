@@ -1,0 +1,144 @@
+rules_version = '2';
+
+/**
+ * Cloud Firestore Security Rules
+ * Sistema de Controle de Compras e Recebimento
+ * 
+ * NOTA: Estas regras serão aplicadas quando a migração for concluída
+ * Status: PLANEJADO - Aguardando implementação da migração
+ */
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Função helper para verificar se o usuário está autenticado
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Função helper para verificar se o usuário é o proprietário
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // Função helper para verificar timestamp
+    function isValidTimestamp() {
+      return request.resource.data.updatedAt == request.time;
+    }
+    
+    // ===== COLEÇÃO DE CLIENTES =====
+    match /clientes/{clienteId} {
+      // Permitir leitura e escrita para usuários autenticados
+      // TODO: Implementar controle de acesso mais granular por cliente
+      allow read, write: if isAuthenticated();
+      
+      // Sub-coleção de projetos
+      match /projetos/{projetoId} {
+        allow read, write: if isAuthenticated();
+        
+        // Sub-coleção de listas
+        match /listas/{listaId} {
+          allow read, write: if isAuthenticated();
+          
+          // Sub-coleção de itens (onde acontece a maior parte das operações)
+          match /itens/{itemId} {
+            allow read, write: if isAuthenticated();
+            
+            // Validar que os campos desnormalizados não podem ser alterados
+            allow update: if isAuthenticated() && 
+                         request.resource.data.clienteId == resource.data.clienteId &&
+                         request.resource.data.projetoId == resource.data.projetoId &&
+                         request.resource.data.listaId == resource.data.listaId;
+          }
+        }
+      }
+    }
+    
+    // ===== COLEÇÃO DE FORNECEDORES =====
+    match /fornecedores/{fornecedorId} {
+      // Permitir leitura para todos os usuários autenticados
+      allow read: if isAuthenticated();
+      
+      // Permitir escrita apenas para administradores (implementar posteriormente)
+      allow write: if isAuthenticated();
+      // TODO: Implementar role de administrador
+      // allow write: if isAuthenticated() && hasRole('admin');
+    }
+    
+    // ===== COLEÇÃO DE USUÁRIOS =====
+    match /usuarios/{userId} {
+      // Usuários podem ler e editar apenas seus próprios dados
+      allow read, write: if isOwner(userId);
+    }
+    
+    // ===== COLEÇÃO DE SEPARAÇÃO DE PRODUÇÃO =====
+    match /SeparacaoProd/{clienteId} {
+      allow read, write: if isAuthenticated();
+      
+      match /projetos/{projetoId} {
+        allow read, write: if isAuthenticated();
+        
+        match /listas/{listaId} {
+          allow read, write: if isAuthenticated();
+          
+          match /itensSeparados/{itemId} {
+            allow read, write: if isAuthenticated();
+          }
+        }
+      }
+    }
+    
+    // ===== COLEÇÃO DE CORREÇÃO FINAL =====
+    match /CorrecaoFinal/{clienteId} {
+      allow read, write: if isAuthenticated();
+      
+      match /projetos/{projetoId} {
+        allow read, write: if isAuthenticated();
+        
+        match /listas/{listaId} {
+          allow read, write: if isAuthenticated();
+          
+          match /itensParaCorrecao/{itemId} {
+            allow read, write: if isAuthenticated();
+          }
+        }
+      }
+    }
+    
+    // ===== COLEÇÃO DE TESTE (para verificar conectividade) =====
+    match /_test/{document} {
+      allow read: if isAuthenticated();
+    }
+    
+    // ===== REGRAS PADRÃO =====
+    // Bloquear acesso a qualquer outra coleção não especificada
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+/**
+ * NOTAS PARA IMPLEMENTAÇÃO FUTURA:
+ * 
+ * 1. ROLES E PERMISSÕES:
+ *    - Implementar sistema de roles (admin, user, viewer)
+ *    - Adicionar controle granular por cliente/projeto
+ * 
+ * 2. VALIDAÇÃO DE DADOS:
+ *    - Validar estrutura de dados obrigatórios
+ *    - Verificar tipos de campos
+ *    - Implementar validação de business rules
+ * 
+ * 3. AUDIT LOG:
+ *    - Implementar log de alterações para auditoria
+ *    - Rastrear quem fez alterações e quando
+ * 
+ * 4. RATE LIMITING:
+ *    - Implementar controle de taxa de operações
+ *    - Prevenir abuso de API
+ * 
+ * 5. BACKUP E RECUPERAÇÃO:
+ *    - Regras para operações de backup
+ *    - Controle de acesso para operações de manutenção
+ */
