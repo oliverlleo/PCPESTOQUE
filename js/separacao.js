@@ -1,951 +1,752 @@
 /**
  * separacao.js
- * Módulo responsável pela separação de itens
+ * Módulo de separação de materiais usando APENAS Cloud Firestore
  * 
- * MIGRADO PARA FIRESTORE: Este arquivo agora usa APENAS Firestore
+ * MIGRAÇÃO COMPLETA: Realtime Database removido completamente
  */
 
-// Inicialização e configuração global
-let tabelaSeparacao;
-let modalConfirmacao;
-let modalDetalhes;
-let clienteSelecionado = "";
-let tipoProjetoSelecionado = "";
-let nomeListaOriginalSelecionada = "";
-let dadosListaSelecionada = {};
-let clientesData = {};
+console.log('📦 separacao.js carregado - FIRESTORE EXCLUSIVO');
 
-// Inicialização dos componentes ao carregar o documento
-document.addEventListener("DOMContentLoaded", function () {
-    console.log("Inicializando separacao.js...");
+// Variáveis globais
+let clienteAtual = null;
+let projetoAtual = null;
+let listaOriginal = null;
+let itensOriginais = [];
+let itensNovos = [];
+let resultadoComparacao = null;
+
+// Inicialização
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 Inicializando página de separação...');
     
-    inicializarComponentes();
-    carregarClientes();
-    
-    // Configurar eventos
-    document.getElementById("btnSalvarSeparacao").addEventListener("click", () => salvarSeparacao());
-    document.getElementById("btnExportar").addEventListener("click", exportarTabelaExcel);
-    
-    // Listener para alterações no cliente selecionado
-    document.getElementById("selectCliente").addEventListener("change", function () {
-        clienteSelecionado = this.value;
-        if (clienteSelecionado) {
-            document.getElementById("selectTipoProjeto").disabled = false;
-            carregarTiposProjeto(clienteSelecionado);
-        } else {
-            document.getElementById("selectTipoProjeto").disabled = true;
-            document.getElementById("selectTipoProjeto").innerHTML = '<option value="">Selecione...</option>';
-            document.getElementById("selectListaOriginal").disabled = true;
-            document.getElementById("selectListaOriginal").innerHTML = '<option value="">Selecione...</option>';
-        }
-    });
-    
-    // Listener para alterações no tipo de projeto selecionado
-    document.getElementById("selectTipoProjeto").addEventListener("change", function () {
-        tipoProjetoSelecionado = this.value;
-        if (tipoProjetoSelecionado) {
-            document.getElementById("selectListaOriginal").disabled = false;
-            carregarListasOriginais(clienteSelecionado, tipoProjetoSelecionado);
-        } else {
-            document.getElementById("selectListaOriginal").disabled = true;
-            document.getElementById("selectListaOriginal").innerHTML = '<option value="">Selecione...</option>';
-        }
-    });
-    
-    // Listener para alterações na lista original selecionada
-    document.getElementById("selectListaOriginal").addEventListener("change", function () {
-        nomeListaOriginalSelecionada = this.value;
-        if (nomeListaOriginalSelecionada) {
-            document.getElementById("btnCarregarLista").disabled = false;
-        } else {
-            document.getElementById("btnCarregarLista").disabled = true;
-        }
-    });
-    
-    // Listener para o botão de carregar lista
-    document.getElementById("btnCarregarLista").addEventListener("click", () => 
-        carregarListaSeparacao(clienteSelecionado, tipoProjetoSelecionado, nomeListaOriginalSelecionada)
-    );
+    if (window.db) {
+        inicializarPagina();
+    } else {
+        window.addEventListener('firebaseReady', inicializarPagina);
+    }
 });
 
 /**
- * Verifica se uma lista já foi processada
+ * Inicializar página
  */
-async function verificarListaProcessada(clienteId, tipoProjeto, nomeListaOriginal) {
-    console.log(`Verificando se a lista já foi processada: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
+function inicializarPagina() {
+    console.log('📦 Configurando página de separação...');
     
-    return new Promise(async (resolve, reject) => {
-        if (!clienteId || !tipoProjeto || !nomeListaOriginal) {
-            console.error("Parâmetros inválidos para verificarListaProcessada");
-            return resolve(false);
-        }
-
-        try {
-            // Usar Firestore em vez de Realtime Database
-            const refCorrecaoFinal = window.db
-                .collection('CorrecaoFinal')
-                .doc(clienteId)
-                .collection(tipoProjeto)
-                .doc(nomeListaOriginal)
-                .collection('itensProcessados');
-                
-            const snapshot = await refCorrecaoFinal.limit(1).get();
-            const itensProcessados = !snapshot.empty;
-            
-            console.log(`Lista processada? ${itensProcessados}`);
-            resolve(itensProcessados);
-        } catch (error) {
-            console.error("Erro ao verificar lista processada:", error);
-            resolve(false);
-        }
-    });
+    inicializarComponentes();
+    carregarClientes();
+    configurarEventListeners();
 }
 
 /**
- * Formata os dados para exibição na tabela
+ * Inicializar componentes
  */
-async function formatarDadosParaTabela(dados, clienteId, tipoProjeto, nomeListaOriginal) {
-    console.log("Formatando dados para tabela de separação");
-    
-    return new Promise(async (resolve, reject) => {
-        try {
-            // Usar Firestore em vez de Realtime Database
-            const refCorrecaoFinal = window.db
-                .collection('CorrecaoFinal')
-                .doc(clienteId)
-                .collection(tipoProjeto)
-                .doc(nomeListaOriginal)
-                .collection('itensProcessados');
-                
-            const snapshot = await refCorrecaoFinal.get();
-            let itensProcessados = [];
-            
-            snapshot.forEach(doc => {
-                itensProcessados.push(doc.data());
-            });
-            
-            console.log(`Itens processados encontrados: ${itensProcessados.length}`);
-            
-            const dadosFormatados = [];
-            
-            for (const item of Object.values(dados)) {
-                if (!item) continue;
-                
-                // Verifica se o item já foi processado
-                const itemProcessado = itensProcessados.find(i => i.id === item.id);
-                
-                // Adiciona as informações necessárias para a tabela
-                dadosFormatados.push({
-                    id: item.id,
-                    descricao: item.descricao || '-',
-                    codigoMaterial: item.codigoMaterial || '-',
-                    quantidade: item.quantidade || 0,
-                    unidade: item.unidade || '-',
-                    quantidadeSeparada: item.quantidade || 0,
-                    status: itemProcessado ? 'Processado' : 'Pendente',
-                    itemOriginal: item
-                });
-            }
-            
-            resolve(dadosFormatados);
-        } catch (error) {
-            console.error("Erro ao formatar dados para tabela:", error);
-            reject(error);
-        }
-    });
+function inicializarComponentes() {
+    // Inicializar Select2
+    if (typeof $ !== 'undefined' && $.fn.select2) {
+        $("#clienteSelect").select2({
+            placeholder: "Selecione um cliente",
+            allowClear: true
+        });
+        
+        $("#projetoSelect").select2({
+            placeholder: "Selecione um projeto",
+            allowClear: true
+        });
+        
+        $("#listaSelect").select2({
+            placeholder: "Selecione uma lista",
+            allowClear: true
+        });
+    }
 }
 
 /**
- * Obtém e formata itens que já estão na correção final
+ * Configurar event listeners
  */
-async function obterItensSeparacao(clienteId, tipoProjeto, nomeListaOriginal) {
-    console.log(`Obtendo itens de separação: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
-    
-    return new Promise(async (resolve, reject) => {
-        try {
-            // Usar Firestore em vez de Realtime Database
-            const refCorrecaoFinal = window.db
-                .collection('CorrecaoFinal')
-                .doc(clienteId)
-                .collection(tipoProjeto)
-                .doc(nomeListaOriginal)
-                .collection('itensProcessados');
-                
-            const snapshot = await refCorrecaoFinal.get();
-            let itensProcessados = [];
-            
-            snapshot.forEach(doc => {
-                itensProcessados.push(doc.data());
-            });
-            
-            console.log(`Itens já processados: ${itensProcessados.length}`);
-            resolve(itensProcessados);
-        } catch (error) {
-            console.error("Erro ao obter itens de separação:", error);
-            reject(error);
+function configurarEventListeners() {
+    // Seleções
+    document.getElementById('clienteSelect')?.addEventListener('change', function() {
+        const clienteId = this.value;
+        if (clienteId) {
+            selecionarCliente(clienteId);
+        } else {
+            limparProjetos();
         }
     });
+    
+    document.getElementById('projetoSelect')?.addEventListener('change', function() {
+        const projetoId = this.value;
+        if (projetoId) {
+            selecionarProjeto(projetoId);
+        } else {
+            limparListas();
+        }
+    });
+    
+    document.getElementById('listaSelect')?.addEventListener('change', function() {
+        const listaId = this.value;
+        if (listaId) {
+            selecionarLista(listaId);
+        }
+    });
+    
+    // Upload de arquivo
+    document.getElementById('arquivoSeparacao')?.addEventListener('change', processarArquivoSeparacao);
+    
+    // Botões
+    document.getElementById('btnCompararListas')?.addEventListener('click', compararListas);
+    document.getElementById('btnGerarCorrecao')?.addEventListener('click', gerarCorrecaoFinal);
+    document.getElementById('btnExportarResultado')?.addEventListener('click', exportarResultado);
 }
 
 /**
- * Atualiza o item na correção final
+ * Carregar clientes
  */
-async function atualizarItemCorrecaoFinal(item, clienteId, tipoProjeto, nomeListaOriginal) {
-    console.log("Atualizando item na correção final:", item.id);
-    
-    return new Promise(async (resolve, reject) => {
-        try {
-            // Usar Firestore em vez de Realtime Database
-            const refCorrecaoFinal = window.db
-                .collection('CorrecaoFinal')
-                .doc(clienteId)
-                .collection(tipoProjeto)
-                .doc(nomeListaOriginal)
-                .collection('itensProcessados');
-                
-            const snapshot = await refCorrecaoFinal.get();
-            let itensProcessados = [];
+async function carregarClientes() {
+    try {
+        console.log('📥 Carregando clientes...');
+        
+        const clientes = await window.FirestoreAPI.buscarTodosClientes();
+        
+        const selectCliente = document.getElementById('clienteSelect');
+        if (selectCliente) {
+            selectCliente.innerHTML = '<option value="">Selecione um cliente</option>';
             
-            snapshot.forEach(doc => {
-                itensProcessados.push({
-                    id: doc.id,
-                    ...doc.data()
-                });
-            });
-            
-            // Adiciona ou atualiza o item
-            const itemIndex = itensProcessados.findIndex(i => i.id === item.id);
-            
-            if (itemIndex !== -1) {
-                // Atualiza o item existente
-                await refCorrecaoFinal.doc(item.id).update({
-                    ...item,
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            } else {
-                // Adiciona novo item
-                await refCorrecaoFinal.doc(item.id).set({
-                    ...item,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            }
-            
-            console.log("Item atualizado com sucesso na correção final");
-            resolve(true);
-        } catch (error) {
-            console.error("Erro ao atualizar item na correção final:", error);
-            reject(error);
-        }
-    });
-}
-
-/**
- * Carrega os clientes do Firestore
- */
-function carregarClientes() {
-    console.log("Carregando clientes do Firestore...");
-    
-    // Usar Firestore em vez de Realtime Database
-    const clientesRef = window.db.collection("clientes");
-
-    clientesRef
-        .get()
-        .then(snapshot => {
-            const selectCliente = document.getElementById("selectCliente");
-            selectCliente.innerHTML = '<option value="">Selecione...</option>';
-            
-            clientesData = {}; // Limpar dados anteriores
-            
-            if (snapshot.empty) {
-                console.log("Nenhum cliente encontrado");
-                return;
-            }
-            
-            snapshot.forEach(doc => {
-                const cliente = doc.data();
-                const clienteId = doc.id;
-                
-                clientesData[clienteId] = cliente;
-                
-                const option = document.createElement("option");
-                option.value = clienteId;
-                option.textContent = cliente.nome || clienteId;
+            clientes.forEach(cliente => {
+                const option = document.createElement('option');
+                option.value = cliente.id;
+                option.textContent = cliente.nome || cliente.id;
                 selectCliente.appendChild(option);
             });
             
-            console.log(`${snapshot.size} clientes carregados`);
-        })
-        .catch(error => {
-            console.error("Erro ao carregar clientes:", error);
-            mostrarNotificacao("Erro ao carregar clientes", "danger");
-        });
-}
-
-/**
- * Carrega os tipos de projeto do cliente selecionado
- */
-async function carregarTiposProjeto(clienteId) {
-    console.log(`Carregando tipos de projeto para cliente: ${clienteId}`);
-    
-    const selectTipoProjeto = document.getElementById("selectTipoProjeto");
-    selectTipoProjeto.innerHTML = '<option value="">Selecione...</option>';
-    
-    try {
-        // Usar Firestore em vez de Realtime Database
-        const projetosRef = window.db
-            .collection("clientes")
-            .doc(clienteId)
-            .collection("projetos");
-            
-        const snapshot = await projetosRef.get();
-        
-        if (snapshot.empty) {
-            console.log("Nenhum tipo de projeto encontrado");
-            return;
-        }
-        
-        snapshot.forEach(doc => {
-            const tipoProjeto = doc.id;
-            
-            const option = document.createElement("option");
-            option.value = tipoProjeto;
-            option.textContent = tipoProjeto.charAt(0).toUpperCase() + tipoProjeto.slice(1);
-            selectTipoProjeto.appendChild(option);
-        });
-        
-        console.log(`${snapshot.size} tipos de projeto carregados`);
-    } catch (error) {
-        console.error("Erro ao carregar tipos de projeto:", error);
-        mostrarNotificacao("Erro ao carregar tipos de projeto", "danger");
-    }
-}
-
-/**
- * Carrega as listas originais para o cliente e tipo de projeto selecionados
- */
-async function carregarListasOriginais(clienteId, tipo) {
-    console.log(`Carregando listas para cliente: ${clienteId}, tipo: ${tipo}`);
-    
-    const selectListaOriginal = document.getElementById("selectListaOriginal");
-    selectListaOriginal.innerHTML = '<option value="">Selecione...</option>';
-    
-    try {
-        // Usar Firestore em vez de Realtime Database
-        const refListasRoot = window.db
-            .collection("clientes")
-            .doc(clienteId)
-            .collection("projetos")
-            .doc(tipo)
-            .collection("listas");
-            
-        const snapshotListas = await refListasRoot.get();
-        
-        if (snapshotListas.empty) {
-            console.log("Nenhuma lista encontrada");
-            return;
-        }
-        
-        snapshotListas.forEach(doc => {
-            const nomeLista = doc.id;
-            
-            const option = document.createElement("option");
-            option.value = nomeLista;
-            option.textContent = nomeLista;
-            selectListaOriginal.appendChild(option);
-        });
-        
-        console.log(`${snapshotListas.size} listas originais carregadas`);
-    } catch (error) {
-        console.error("Erro ao carregar listas:", error);
-        mostrarNotificacao("Erro ao carregar listas", "danger");
-    }
-}
-
-/**
- * Carrega os itens da lista selecionada para separação
- */
-async function carregarListaSeparacao(clienteId, tipoProjeto, nomeListaOriginal) {
-    console.log(`Carregando lista para separação: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
-    
-    if (!clienteId || !tipoProjeto || !nomeListaOriginal) {
-        mostrarNotificacao("Selecione cliente, tipo de projeto e lista", "warning");
-        return;
-    }
-    
-    // Mostrar loading
-    mostrarLoading(true);
-    
-    try {
-        // Verifica se já existe uma lista de separação salva
-        const listaProcessada = await verificarListaProcessada(clienteId, tipoProjeto, nomeListaOriginal);
-        
-        if (listaProcessada) {
-            await carregarListaProcessada(clienteId, tipoProjeto, nomeListaOriginal);
-        } else {
-            await carregarListaOriginal(clienteId, tipoProjeto, nomeListaOriginal);
-        }
-        
-        // Atualiza os botões de ação
-        document.getElementById("btnSalvarSeparacao").disabled = false;
-        document.getElementById("btnExportar").disabled = false;
-        
-        // Esconde o loading
-        mostrarLoading(false);
-    } catch (error) {
-        console.error("Erro ao carregar lista para separação:", error);
-        mostrarNotificacao("Erro ao carregar lista para separação", "danger");
-        mostrarLoading(false);
-    }
-}
-
-/**
- * Carrega uma lista já processada
- */
-async function carregarListaProcessada(clienteId, tipoProjeto, nomeListaOriginal) {
-    console.log(`Carregando lista já processada: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
-    
-    try {
-        // Buscar itens da lista original no Firestore
-        const itensOriginaisRef = window.db
-            .collection("clientes")
-            .doc(clienteId)
-            .collection("projetos")
-            .doc(tipoProjeto)
-            .collection("listas")
-            .doc(nomeListaOriginal)
-            .collection("itens");
-            
-        const itensOriginaisSnapshot = await itensOriginaisRef.get();
-        
-        if (itensOriginaisSnapshot.empty) {
-            console.log("Nenhum item encontrado na lista original");
-            mostrarNotificacao("Nenhum item encontrado na lista original", "warning");
-            return;
-        }
-        
-        // Converter snapshot para objeto
-        const itensOriginais = {};
-        itensOriginaisSnapshot.forEach(doc => {
-            itensOriginais[doc.id] = {
-                id: doc.id,
-                ...doc.data()
-            };
-        });
-        
-        // Buscar itens da lista de separação no Firestore
-        const itensSeparacaoRef = window.db
-            .collection("SeparacaoProd")
-            .doc(clienteId)
-            .collection(tipoProjeto)
-            .doc(nomeListaOriginal)
-            .collection("itens");
-            
-        const itensSeparacaoSnapshot = await itensSeparacaoRef.get();
-        
-        // Converter snapshot para objeto
-        const itensSeparacao = {};
-        itensSeparacaoSnapshot.forEach(doc => {
-            itensSeparacao[doc.id] = {
-                id: doc.id,
-                ...doc.data()
-            };
-        });
-        
-        // Mesclar dados originais com dados de separação
-        const dadosMesclados = {};
-        
-        for (const [itemId, itemOriginal] of Object.entries(itensOriginais)) {
-            dadosMesclados[itemId] = {
-                ...itemOriginal,
-                quantidadeSeparada: itensSeparacao[itemId]?.quantidadeSeparada || itemOriginal.quantidade || 0
-            };
-        }
-        
-        // Formatar dados para tabela e renderizar
-        const dadosFormatados = await formatarDadosParaTabela(
-            dadosMesclados,
-            clienteId,
-            tipoProjeto,
-            nomeListaOriginal
-        );
-        
-        renderizarTabelaSeparacao(dadosFormatados);
-        dadosListaSelecionada = dadosFormatados;
-        
-        console.log(`Lista processada carregada com ${dadosFormatados.length} itens`);
-        mostrarNotificacao(`Lista já processada carregada com ${dadosFormatados.length} itens`, "success");
-    } catch (error) {
-        console.error("Erro ao carregar lista processada:", error);
-        mostrarNotificacao("Erro ao carregar lista processada", "danger");
-    }
-}
-
-/**
- * Carrega uma lista original (ainda não processada)
- */
-async function carregarListaOriginal(clienteId, tipoProjeto, nomeListaOriginal) {
-    console.log(`Carregando lista original: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
-    
-    try {
-        // Buscar itens da lista original no Firestore
-        const itensRef = window.db
-            .collection("clientes")
-            .doc(clienteId)
-            .collection("projetos")
-            .doc(tipoProjeto)
-            .collection("listas")
-            .doc(nomeListaOriginal)
-            .collection("itens");
-            
-        const snapshot = await itensRef.get();
-        
-        if (snapshot.empty) {
-            console.log("Nenhum item encontrado na lista original");
-            mostrarNotificacao("Nenhum item encontrado na lista original", "warning");
-            return;
-        }
-        
-        // Converter snapshot para objeto
-        const itens = {};
-        snapshot.forEach(doc => {
-            itens[doc.id] = {
-                id: doc.id,
-                ...doc.data()
-            };
-        });
-        
-        // Formatar dados para tabela e renderizar
-        const dadosFormatados = await formatarDadosParaTabela(
-            itens,
-            clienteId,
-            tipoProjeto,
-            nomeListaOriginal
-        );
-        
-        renderizarTabelaSeparacao(dadosFormatados);
-        dadosListaSelecionada = dadosFormatados;
-        
-        console.log(`Lista original carregada com ${dadosFormatados.length} itens`);
-        mostrarNotificacao(`Lista original carregada com ${dadosFormatados.length} itens`, "success");
-    } catch (error) {
-        console.error("Erro ao carregar lista original:", error);
-        mostrarNotificacao("Erro ao carregar lista original", "danger");
-    }
-}
-
-/**
- * Salva os dados da separação
- */
-async function salvarSeparacao() {
-    console.log("Salvando separação...");
-    
-    if (!clienteSelecionado || !tipoProjetoSelecionado || !nomeListaOriginalSelecionada) {
-        mostrarNotificacao("Selecione cliente, tipo de projeto e lista", "warning");
-        return;
-    }
-    
-    if (tabelaSeparacao) {
-        mostrarLoading(true);
-        
-        try {
-            // Obter dados da tabela
-            const dados = tabelaSeparacao.data();
-            
-            if (!dados || dados.length === 0) {
-                mostrarNotificacao("Nenhum item para salvar", "warning");
-                mostrarLoading(false);
-                return;
+            if (typeof $ !== 'undefined' && $.fn.select2) {
+                $("#clienteSelect").trigger('change');
             }
+        }
+        
+        console.log(`✅ ${clientes.length} clientes carregados`);
+        
+    } catch (error) {
+        console.error('❌ Erro ao carregar clientes:', error);
+        mostrarNotificacao('Erro ao carregar clientes', 'danger');
+    }
+}
+
+/**
+ * Selecionar cliente
+ */
+async function selecionarCliente(clienteId) {
+    try {
+        console.log('👤 Selecionando cliente:', clienteId);
+        
+        const cliente = await window.FirestoreAPI.buscarCliente(clienteId);
+        if (!cliente) {
+            mostrarNotificacao('Cliente não encontrado', 'danger');
+            return;
+        }
+        
+        clienteAtual = { ...cliente, id: clienteId };
+        
+        // Carregar projetos
+        await carregarProjetos(clienteId);
+        
+        console.log('✅ Cliente selecionado:', cliente.nome);
+        
+    } catch (error) {
+        console.error('❌ Erro ao selecionar cliente:', error);
+        mostrarNotificacao('Erro ao selecionar cliente', 'danger');
+    }
+}
+
+/**
+ * Carregar projetos do cliente
+ */
+async function carregarProjetos(clienteId) {
+    try {
+        const projetos = await window.FirestoreAPI.buscarProjetosCliente(clienteId);
+        
+        const selectProjeto = document.getElementById('projetoSelect');
+        if (selectProjeto) {
+            selectProjeto.innerHTML = '<option value="">Selecione um projeto</option>';
             
-            // Formatar itens para salvar no Firestore
-            const itensFormatados = {};
-            
-            dados.forEach(item => {
-                itensFormatados[item.id] = {
-                    id: item.id,
-                    descricao: item.descricao,
-                    codigoMaterial: item.codigoMaterial,
-                    quantidade: item.quantidade,
-                    unidade: item.unidade,
-                    quantidadeSeparada: item.quantidadeSeparada,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                };
+            projetos.forEach(projeto => {
+                const option = document.createElement('option');
+                option.value = projeto.id;
+                option.textContent = projeto.nome || projeto.tipo || projeto.id;
+                selectProjeto.appendChild(option);
             });
             
-            // Salvar no Firestore em SeparacaoProd
-            const separacaoProdRef = window.db
-                .collection("SeparacaoProd")
-                .doc(clienteSelecionado)
-                .collection(tipoProjetoSelecionado)
-                .doc(nomeListaOriginalSelecionada);
-                
-            await separacaoProdRef.set({
-                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                status: "separado"
-            });
+            selectProjeto.disabled = false;
             
-            // Salvar os itens em uma subcoleção
-            const itensRef = separacaoProdRef.collection("itens");
-            
-            // Usar batch para salvar múltiplos documentos
-            const batch = window.db.batch();
-            
-            for (const [itemId, itemData] of Object.entries(itensFormatados)) {
-                const docRef = itensRef.doc(itemId);
-                batch.set(docRef, itemData);
+            if (typeof $ !== 'undefined' && $.fn.select2) {
+                $("#projetoSelect").trigger('change');
             }
-            
-            await batch.commit();
-            
-            // Processamento adicional - comparar listas e criar correção final
-            await processarResultadoSeparacao(
-                clienteSelecionado,
-                tipoProjetoSelecionado, 
-                nomeListaOriginalSelecionada
-            );
-            
-            mostrarNotificacao("Separação salva com sucesso", "success");
-            mostrarLoading(false);
-        } catch (error) {
-            console.error("Erro ao salvar separação:", error);
-            mostrarNotificacao("Erro ao salvar separação", "danger");
-            mostrarLoading(false);
         }
-    } else {
-        mostrarNotificacao("Nenhum item para salvar", "warning");
+        
+        console.log(`✅ ${projetos.length} projetos carregados`);
+        
+    } catch (error) {
+        console.error('❌ Erro ao carregar projetos:', error);
+        mostrarNotificacao('Erro ao carregar projetos', 'danger');
     }
 }
 
 /**
- * Processa o resultado da separação
+ * Selecionar projeto
  */
-async function processarResultadoSeparacao(clienteId, tipoProjeto, nomeListaOriginal) {
-    console.log(`Processando resultado da separação: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
-    
-    // 1. Buscar Lista Original (com empenho/recebido)
-    const origRef = window.db
-        .collection("clientes")
-        .doc(clienteId)
-        .collection("projetos")
-        .doc(tipoProjeto)
-        .collection("listas")
-        .doc(nomeListaOriginal)
-        .collection("itens");
+async function selecionarProjeto(projetoId) {
+    try {
+        console.log('📁 Selecionando projeto:', projetoId);
         
-    const origSnapshot = await origRef.get();
-    
-    if (origSnapshot.empty) {
-        console.log("Nenhum item encontrado na lista original");
-        return;
+        projetoAtual = { id: projetoId };
+        
+        // Carregar listas do projeto
+        await carregarListas(clienteAtual.id, projetoId);
+        
+        console.log('✅ Projeto selecionado');
+        
+    } catch (error) {
+        console.error('❌ Erro ao selecionar projeto:', error);
+        mostrarNotificacao('Erro ao selecionar projeto', 'danger');
     }
-    
-    // Converter snapshot para objeto
-    const listaOriginalItens = {};
-    origSnapshot.forEach(doc => {
-        listaOriginalItens[doc.id] = {
+}
+
+/**
+ * Carregar listas do projeto
+ */
+async function carregarListas(clienteId, projetoId) {
+    try {
+        const snapshot = await window.db
+            .collection('clientes')
+            .doc(clienteId)
+            .collection('projetos')
+            .doc(projetoId)
+            .collection('listas')
+            .get();
+        
+        const listas = snapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
-        };
-    });
-    
-    // 2. Buscar Nova Lista de Separação (recém salva)
-    const sepRef = window.db
-        .collection("SeparacaoProd")
-        .doc(clienteId)
-        .collection(tipoProjeto)
-        .doc(nomeListaOriginal)
-        .collection("itens");
-        
-    const sepSnapshot = await sepRef.get();
-    
-    if (sepSnapshot.empty) {
-        console.log("Nenhum item encontrado na lista de separação");
-        return;
-    }
-    
-    // Converter snapshot para objeto
-    const listaSeparacaoItens = {};
-    sepSnapshot.forEach(doc => {
-        listaSeparacaoItens[doc.id] = {
-            id: doc.id,
-            ...doc.data()
-        };
-    });
-    
-    // 3. Comparar as duas listas e criar itens processados
-    const itensProcessados = [];
-    
-    for (const [itemId, itemOriginal] of Object.entries(listaOriginalItens)) {
-        const itemSeparacao = listaSeparacaoItens[itemId];
-        
-        if (!itemSeparacao) continue;
-        
-        const quantidadeOriginal = itemOriginal.quantidade || 0;
-        const quantidadeSeparada = itemSeparacao.quantidadeSeparada || 0;
-        const quantidadeEmpenhada = itemOriginal.quantidadeEmpenhada || 0;
-        const quantidadeRecebida = itemOriginal.quantidadeRecebida || 0;
-        
-        let status = "OK";
-        let diferenca = 0;
-        
-        // Verificar diferenças
-        if (quantidadeSeparada < quantidadeOriginal) {
-            status = "PARCIAL";
-            diferenca = quantidadeOriginal - quantidadeSeparada;
-        } else if (quantidadeSeparada > quantidadeOriginal) {
-            status = "EXCESSO";
-            diferenca = quantidadeSeparada - quantidadeOriginal;
-        }
-        
-        // Adicionar ao array de itens processados
-        itensProcessados.push({
-            id: itemId,
-            descricao: itemOriginal.descricao || "",
-            codigoMaterial: itemOriginal.codigoMaterial || "",
-            quantidade: quantidadeOriginal,
-            unidade: itemOriginal.unidade || "",
-            quantidadeSeparada: quantidadeSeparada,
-            quantidadeEmpenhada: quantidadeEmpenhada,
-            quantidadeRecebida: quantidadeRecebida,
-            diferenca: diferenca,
-            status: status,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        });
-    }
-    
-    // Salvar o resultado da comparação em CorrecaoFinal
-    const correcaoFinalRef = window.db
-        .collection("CorrecaoFinal")
-        .doc(clienteId)
-        .collection(tipoProjeto)
-        .doc(nomeListaOriginal);
-        
-    await correcaoFinalRef.set({
-        status: "processado",
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    
-    // Salvar os itens processados em uma subcoleção
-    const itensProcessadosRef = correcaoFinalRef.collection("itensProcessados");
-    
-    // Usar batch para salvar múltiplos documentos
-    const batch = window.db.batch();
-    
-    for (const item of itensProcessados) {
-        const docRef = itensProcessadosRef.doc(item.id);
-        batch.set(docRef, item);
-    }
-    
-    await batch.commit();
-    
-    console.log(`Processamento finalizado com ${itensProcessados.length} itens`);
-}
-
-/**
- * Carrega e exibe o relatório de correção final
- */
-async function carregarRelatorioCorrecaoFinal(clienteId, tipoProjeto, nomeListaOriginal) {
-    console.log(`Carregando relatório de correção final: ${clienteId}/${tipoProjeto}/${nomeListaOriginal}`);
-    
-    try {
-        const correcaoFinalRef = window.db
-            .collection("CorrecaoFinal")
-            .doc(clienteId)
-            .collection(tipoProjeto)
-            .doc(nomeListaOriginal)
-            .collection("itensProcessados");
-            
-        const snapshot = await correcaoFinalRef.get();
-        
-        if (snapshot.empty) {
-            console.log("Nenhum item encontrado no relatório de correção final");
-            return [];
-        }
-        
-        const itens = [];
-        snapshot.forEach(doc => {
-            itens.push({
-                id: doc.id,
-                ...doc.data()
-            });
-        });
-        
-        console.log(`Relatório carregado com ${itens.length} itens`);
-        return itens;
-    } catch (error) {
-        console.error("Erro ao carregar relatório de correção final:", error);
-        return [];
-    }
-}
-
-/**
- * Inicializa os componentes da página
- */
-function inicializarComponentes() {
-    console.log("Inicializando componentes da página");
-    
-    // Inicializa modais
-    modalConfirmacao = new bootstrap.Modal(document.getElementById("modalConfirmacao"));
-    modalDetalhes = new bootstrap.Modal(document.getElementById("modalDetalhes"));
-    
-    // Configura os botões
-    document.getElementById("btnSalvarSeparacao").disabled = true;
-    document.getElementById("btnExportar").disabled = true;
-    document.getElementById("btnCarregarLista").disabled = true;
-    document.getElementById("selectTipoProjeto").disabled = true;
-    document.getElementById("selectListaOriginal").disabled = true;
-}
-
-/**
- * Renderiza a tabela de separação
- */
-function renderizarTabelaSeparacao(dados) {
-    console.log(`Renderizando tabela de separação com ${dados.length} itens`);
-    
-    const tabelaContainer = document.getElementById("tabelaSeparacao");
-    
-    // Destrói a tabela existente se houver
-    if (tabelaSeparacao) {
-        tabelaSeparacao.destroy();
-    }
-    
-    // Inicializa a nova tabela
-    tabelaSeparacao = new DataTable("#tabelaSeparacao", {
-        data: dados,
-        columns: [
-            { data: "id", title: "ID" },
-            { data: "descricao", title: "Descrição" },
-            { data: "codigoMaterial", title: "Código Material" },
-            { data: "quantidade", title: "Quantidade Original" },
-            { data: "unidade", title: "Unidade" },
-            { 
-                data: "quantidadeSeparada", 
-                title: "Quantidade Separada",
-                render: function(data, type, row) {
-                    if (type === "display") {
-                        return `<input type="number" class="form-control form-control-sm input-quantidade-separada" 
-                                value="${data}" min="0" data-id="${row.id}">`;
-                    }
-                    return data;
-                }
-            },
-            { data: "status", title: "Status" }
-        ],
-        language: {
-            url: "//cdn.datatables.net/plug-ins/1.11.5/i18n/pt-BR.json"
-        },
-        responsive: true,
-        ordering: true,
-        paging: true,
-        searching: true,
-        info: true
-    });
-    
-    // Adiciona evento para atualizar os dados quando a quantidade separada for alterada
-    tabelaContainer.addEventListener("change", function(e) {
-        if (e.target.classList.contains("input-quantidade-separada")) {
-            const itemId = e.target.dataset.id;
-            const novaQuantidade = parseFloat(e.target.value) || 0;
-            
-            // Atualiza os dados na tabela
-            const dadosTabela = tabelaSeparacao.data();
-            
-            for (let i = 0; i < dadosTabela.length; i++) {
-                if (dadosTabela[i].id === itemId) {
-                    dadosTabela[i].quantidadeSeparada = novaQuantidade;
-                    tabelaSeparacao.row(i).data(dadosTabela[i]).draw(false);
-                    break;
-                }
-            }
-        }
-    });
-}
-
-/**
- * Exporta a tabela para Excel
- */
-function exportarTabelaExcel() {
-    console.log("Exportando tabela para Excel");
-    
-    if (!tabelaSeparacao) {
-        mostrarNotificacao("Nenhum dado para exportar", "warning");
-        return;
-    }
-    
-    try {
-        const dados = tabelaSeparacao.data();
-        
-        if (!dados || dados.length === 0) {
-            mostrarNotificacao("Nenhum dado para exportar", "warning");
-            return;
-        }
-        
-        // Formatar dados para Excel
-        const dadosExcel = dados.map(item => ({
-            ID: item.id,
-            Descricao: item.descricao,
-            CodigoMaterial: item.codigoMaterial,
-            QuantidadeOriginal: item.quantidade,
-            Unidade: item.unidade,
-            QuantidadeSeparada: item.quantidadeSeparada,
-            Status: item.status
         }));
         
-        // Criar workbook e worksheet
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.json_to_sheet(dadosExcel);
+        const selectLista = document.getElementById('listaSelect');
+        if (selectLista) {
+            selectLista.innerHTML = '<option value="">Selecione uma lista</option>';
+            
+            listas.forEach(lista => {
+                const option = document.createElement('option');
+                option.value = lista.id;
+                option.textContent = lista.nome || lista.id;
+                selectLista.appendChild(option);
+            });
+            
+            selectLista.disabled = false;
+            
+            if (typeof $ !== 'undefined' && $.fn.select2) {
+                $("#listaSelect").trigger('change');
+            }
+        }
         
-        // Adicionar worksheet ao workbook
-        XLSX.utils.book_append_sheet(wb, ws, "Separacao");
+        console.log(`✅ ${listas.length} listas carregadas`);
         
-        // Nome do arquivo
-        const nomeArquivo = `Separacao_${clienteSelecionado}_${tipoProjetoSelecionado}_${nomeListaOriginalSelecionada}.xlsx`;
-        
-        // Exportar
-        XLSX.writeFile(wb, nomeArquivo);
-        
-        mostrarNotificacao("Exportação concluída com sucesso", "success");
     } catch (error) {
-        console.error("Erro ao exportar para Excel:", error);
-        mostrarNotificacao("Erro ao exportar para Excel", "danger");
+        console.error('❌ Erro ao carregar listas:', error);
+        mostrarNotificacao('Erro ao carregar listas', 'danger');
     }
 }
 
 /**
- * Mostra ou esconde o loading
+ * Selecionar lista original
  */
-function mostrarLoading(mostrar) {
-    const loading = document.getElementById("loading");
+async function selecionarLista(listaId) {
+    try {
+        console.log('📋 Selecionando lista:', listaId);
+        
+        listaOriginal = { id: listaId };
+        
+        // Carregar itens da lista
+        await carregarItensLista(clienteAtual.id, projetoAtual.id, listaId);
+        
+        // Habilitar upload de arquivo
+        document.getElementById('arquivoSeparacao').disabled = false;
+        document.getElementById('btnCompararListas').disabled = false;
+        
+        console.log('✅ Lista selecionada');
+        
+    } catch (error) {
+        console.error('❌ Erro ao selecionar lista:', error);
+        mostrarNotificacao('Erro ao selecionar lista', 'danger');
+    }
+}
+
+/**
+ * Carregar itens da lista
+ */
+async function carregarItensLista(clienteId, projetoId, listaId) {
+    try {
+        const snapshot = await window.db
+            .collection('clientes')
+            .doc(clienteId)
+            .collection('projetos')
+            .doc(projetoId)
+            .collection('listas')
+            .doc(listaId)
+            .collection('itens')
+            .get();
+        
+        itensOriginais = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
+        
+        console.log(`✅ ${itensOriginais.length} itens da lista original carregados`);
+        
+        // Exibir resumo
+        exibirResumoListaOriginal();
+        
+    } catch (error) {
+        console.error('❌ Erro ao carregar itens da lista:', error);
+        throw error;
+    }
+}
+
+/**
+ * Exibir resumo da lista original
+ */
+function exibirResumoListaOriginal() {
+    const resumo = document.getElementById('resumoListaOriginal');
+    if (resumo) {
+        resumo.innerHTML = `
+            <div class="alert alert-info">
+                <strong>Lista Original Carregada:</strong><br>
+                Total de itens: ${itensOriginais.length}<br>
+                Cliente: ${clienteAtual.nome}<br>
+                Projeto: ${projetoAtual.id}
+            </div>
+        `;
+    }
+}
+
+/**
+ * Processar arquivo de separação
+ */
+async function processarArquivoSeparacao(event) {
+    const arquivo = event.target.files[0];
+    if (!arquivo) return;
     
-    if (mostrar) {
-        loading.style.display = "flex";
-    } else {
-        loading.style.display = "none";
+    try {
+        console.log('📄 Processando arquivo de separação...');
+        
+        mostrarNotificacao('Processando arquivo...', 'info');
+        
+        // Processar arquivo usando a função existente
+        const resultado = await window.processarArquivo(arquivo, clienteAtual.id, projetoAtual.id, 'separacao');
+        
+        itensNovos = resultado.dados;
+        
+        console.log(`✅ ${itensNovos.length} itens processados do arquivo`);
+        
+        // Exibir resumo
+        exibirResumoArquivoNovo();
+        
+        // Habilitar comparação
+        document.getElementById('btnCompararListas').disabled = false;
+        
+        mostrarNotificacao('Arquivo processado com sucesso!', 'success');
+        
+    } catch (error) {
+        console.error('❌ Erro ao processar arquivo:', error);
+        mostrarNotificacao('Erro ao processar arquivo: ' + error.message, 'danger');
     }
 }
 
 /**
- * Mostra uma notificação na página
+ * Exibir resumo do arquivo novo
  */
-function mostrarNotificacao(mensagem, tipo, tempo = 5000) {
-    const notificacao = document.createElement("div");
-    notificacao.className = `alert alert-${tipo} alert-dismissible fade show notification`;
-    notificacao.innerHTML = `
-        ${mensagem}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
+function exibirResumoArquivoNovo() {
+    const resumo = document.getElementById('resumoArquivoNovo');
+    if (resumo) {
+        resumo.innerHTML = `
+            <div class="alert alert-success">
+                <strong>Arquivo Processado:</strong><br>
+                Total de itens: ${itensNovos.length}<br>
+                Pronto para comparação
+            </div>
+        `;
+    }
+}
+
+/**
+ * Comparar listas
+ */
+function compararListas() {
+    if (!itensOriginais.length || !itensNovos.length) {
+        mostrarNotificacao('Selecione uma lista original e carregue um arquivo novo', 'warning');
+        return;
+    }
+    
+    console.log('⚖️ Comparando listas...');
+    
+    // Criar mapas para comparação eficiente
+    const mapaOriginal = new Map();
+    itensOriginais.forEach(item => {
+        const chave = (item.codigo || '').toLowerCase().trim();
+        if (chave) {
+            mapaOriginal.set(chave, item);
+        }
+    });
+    
+    const mapaNovo = new Map();
+    itensNovos.forEach(item => {
+        const chave = (item.codigo || '').toLowerCase().trim();
+        if (chave) {
+            mapaNovo.set(chave, item);
+        }
+    });
+    
+    // Realizar comparação
+    const itensLiberados = [];
+    const itensDevolvidos = [];
+    const itensParaComprar = [];
+    
+    // Itens da lista nova
+    for (const [codigo, itemNovo] of mapaNovo) {
+        const itemOriginal = mapaOriginal.get(codigo);
+        
+        if (itemOriginal) {
+            const qtdOriginal = itemOriginal.quantidade || 0;
+            const qtdNova = itemNovo.quantidade || 0;
+            
+            if (qtdNova <= qtdOriginal) {
+                // Pode ser liberado
+                itensLiberados.push({
+                    ...itemNovo,
+                    quantidadeOriginal: qtdOriginal,
+                    quantidadeLiberada: qtdNova,
+                    status: 'Liberado'
+                });
+                
+                // Se sobrou, vai para devolução
+                if (qtdNova < qtdOriginal) {
+                    itensDevolvidos.push({
+                        ...itemOriginal,
+                        quantidadeOriginal: qtdOriginal,
+                        quantidadeDevolvida: qtdOriginal - qtdNova,
+                        status: 'Devolver ao Estoque'
+                    });
+                }
+            } else {
+                // Liberar o que tem e comprar a diferença
+                itensLiberados.push({
+                    ...itemOriginal,
+                    quantidadeOriginal: qtdOriginal,
+                    quantidadeLiberada: qtdOriginal,
+                    status: 'Liberado (Parcial)'
+                });
+                
+                itensParaComprar.push({
+                    ...itemNovo,
+                    quantidadeOriginal: qtdOriginal,
+                    quantidadeComprar: qtdNova - qtdOriginal,
+                    status: 'Comprar'
+                });
+            }
+        } else {
+            // Item novo, precisa comprar
+            itensParaComprar.push({
+                ...itemNovo,
+                quantidadeOriginal: 0,
+                quantidadeComprar: itemNovo.quantidade,
+                status: 'Comprar (Novo)'
+            });
+        }
+    }
+    
+    // Itens que sobram na lista original (não estão na nova)
+    for (const [codigo, itemOriginal] of mapaOriginal) {
+        if (!mapaNovo.has(codigo)) {
+            itensDevolvidos.push({
+                ...itemOriginal,
+                quantidadeOriginal: itemOriginal.quantidade,
+                quantidadeDevolvida: itemOriginal.quantidade,
+                status: 'Devolver ao Estoque (Não Usado)'
+            });
+        }
+    }
+    
+    resultadoComparacao = {
+        itensLiberados,
+        itensDevolvidos,
+        itensParaComprar,
+        resumo: {
+            totalLiberados: itensLiberados.length,
+            totalDevolvidos: itensDevolvidos.length,
+            totalParaComprar: itensParaComprar.length
+        }
+    };
+    
+    console.log('✅ Comparação concluída:', resultadoComparacao.resumo);
+    
+    // Exibir resultado
+    exibirResultadoComparacao();
+    
+    // Habilitar geração de correção
+    document.getElementById('btnGerarCorrecao').disabled = false;
+    document.getElementById('btnExportarResultado').disabled = false;
+}
+
+/**
+ * Exibir resultado da comparação
+ */
+function exibirResultadoComparacao() {
+    const container = document.getElementById('resultadoComparacao');
+    if (!container) return;
+    
+    container.innerHTML = `
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card border-success">
+                    <div class="card-header bg-success text-white">
+                        <h6>Itens Liberados (${resultadoComparacao.resumo.totalLiberados})</h6>
+                    </div>
+                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                        ${resultadoComparacao.itensLiberados.map(item => `
+                            <div class="border-bottom py-2">
+                                <strong>${item.codigo}</strong><br>
+                                <small>${item.descricao}</small><br>
+                                <span class="badge bg-success">${item.quantidadeLiberada} liberados</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-warning">
+                    <div class="card-header bg-warning text-dark">
+                        <h6>Devolver ao Estoque (${resultadoComparacao.resumo.totalDevolvidos})</h6>
+                    </div>
+                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                        ${resultadoComparacao.itensDevolvidos.map(item => `
+                            <div class="border-bottom py-2">
+                                <strong>${item.codigo}</strong><br>
+                                <small>${item.descricao}</small><br>
+                                <span class="badge bg-warning">${item.quantidadeDevolvida} devolver</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card border-danger">
+                    <div class="card-header bg-danger text-white">
+                        <h6>Comprar (${resultadoComparacao.resumo.totalParaComprar})</h6>
+                    </div>
+                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                        ${resultadoComparacao.itensParaComprar.map(item => `
+                            <div class="border-bottom py-2">
+                                <strong>${item.codigo}</strong><br>
+                                <small>${item.descricao}</small><br>
+                                <span class="badge bg-danger">${item.quantidadeComprar} comprar</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="alert alert-info mt-3">
+            <h6>Resumo da Comparação:</h6>
+            <ul>
+                <li><strong>${resultadoComparacao.resumo.totalLiberados}</strong> itens podem ser liberados</li>
+                <li><strong>${resultadoComparacao.resumo.totalDevolvidos}</strong> itens devem ser devolvidos ao estoque</li>
+                <li><strong>${resultadoComparacao.resumo.totalParaComprar}</strong> itens precisam ser comprados</li>
+            </ul>
+        </div>
     `;
     
-    document.body.appendChild(notificacao);
-    
-    setTimeout(() => {
-        notificacao.classList.add("show");
-    }, 100);
-    
-    setTimeout(() => {
-        notificacao.classList.remove("show");
-        setTimeout(() => {
-            notificacao.remove();
-        }, 500);
-    }, tempo);
+    container.style.display = 'block';
 }
+
+/**
+ * Gerar correção final
+ */
+async function gerarCorrecaoFinal() {
+    if (!resultadoComparacao) {
+        mostrarNotificacao('Execute a comparação primeiro', 'warning');
+        return;
+    }
+    
+    try {
+        console.log('🔧 Gerando correção final...');
+        
+        const dataCorrecao = new Date().toISOString().split('T')[0];
+        
+        // Salvar na coleção CorrecaoFinal
+        const correcaoRef = window.db
+            .collection('CorrecaoFinal')
+            .doc(clienteAtual.id)
+            .collection('projetos')
+            .doc(projetoAtual.id)
+            .collection('listas')
+            .doc(listaOriginal.id);
+        
+        const batch = window.db.batch();
+        
+        // Salvar itens para correção
+        const todosItensCorrecao = [
+            ...resultadoComparacao.itensLiberados,
+            ...resultadoComparacao.itensDevolvidos,
+            ...resultadoComparacao.itensParaComprar
+        ];
+        
+        todosItensCorrecao.forEach(item => {
+            const itemRef = correcaoRef.collection('itensParaCorrecao').doc();
+            batch.set(itemRef, {
+                ...item,
+                clienteId: clienteAtual.id,
+                projetoId: projetoAtual.id,
+                listaId: listaOriginal.id,
+                dataCorrecao: dataCorrecao,
+                usuarioCorrecao: 'Sistema',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        });
+        
+        // Salvar resumo da correção
+        batch.set(correcaoRef, {
+            clienteId: clienteAtual.id,
+            projetoId: projetoAtual.id,
+            listaId: listaOriginal.id,
+            dataCorrecao: dataCorrecao,
+            resumo: resultadoComparacao.resumo,
+            totalItens: todosItensCorrecao.length,
+            status: 'Gerada',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        await batch.commit();
+        
+        console.log('✅ Correção final gerada');
+        mostrarNotificacao('Correção final gerada com sucesso!', 'success');
+        
+    } catch (error) {
+        console.error('❌ Erro ao gerar correção:', error);
+        mostrarNotificacao('Erro ao gerar correção final', 'danger');
+    }
+}
+
+/**
+ * Exportar resultado
+ */
+function exportarResultado() {
+    if (!resultadoComparacao) {
+        mostrarNotificacao('Execute a comparação primeiro', 'warning');
+        return;
+    }
+    
+    console.log('📤 Exportando resultado...');
+    
+    // Criar CSV com todos os itens
+    const headers = ['Código', 'Descrição', 'Quantidade', 'Status', 'Ação'];
+    const linhas = [];
+    
+    // Adicionar itens liberados
+    resultadoComparacao.itensLiberados.forEach(item => {
+        linhas.push([
+            item.codigo || '',
+            `"${(item.descricao || '').replace(/"/g, '""')}"`,
+            item.quantidadeLiberada || 0,
+            'Liberado',
+            'Usar na produção'
+        ]);
+    });
+    
+    // Adicionar itens devolvidos
+    resultadoComparacao.itensDevolvidos.forEach(item => {
+        linhas.push([
+            item.codigo || '',
+            `"${(item.descricao || '').replace(/"/g, '""')}"`,
+            item.quantidadeDevolvida || 0,
+            'Devolver',
+            'Retornar ao estoque'
+        ]);
+    });
+    
+    // Adicionar itens para comprar
+    resultadoComparacao.itensParaComprar.forEach(item => {
+        linhas.push([
+            item.codigo || '',
+            `"${(item.descricao || '').replace(/"/g, '""')}"`,
+            item.quantidadeComprar || 0,
+            'Comprar',
+            'Incluir em nova compra'
+        ]);
+    });
+    
+    const csvContent = [
+        headers.join(','),
+        ...linhas.map(linha => linha.join(','))
+    ].join('\n');
+    
+    // Download do arquivo
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `separacao_${clienteAtual.nome}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    
+    mostrarNotificacao('Resultado exportado com sucesso!', 'success');
+}
+
+/**
+ * Limpar seleções
+ */
+function limparProjetos() {
+    const selectProjeto = document.getElementById('projetoSelect');
+    if (selectProjeto) {
+        selectProjeto.innerHTML = '<option value="">Selecione um projeto</option>';
+        selectProjeto.disabled = true;
+    }
+    
+    projetoAtual = null;
+    limparListas();
+}
+
+function limparListas() {
+    const selectLista = document.getElementById('listaSelect');
+    if (selectLista) {
+        selectLista.innerHTML = '<option value="">Selecione uma lista</option>';
+        selectLista.disabled = true;
+    }
+    
+    listaOriginal = null;
+    itensOriginais = [];
+    
+    // Desabilitar upload e comparação
+    document.getElementById('arquivoSeparacao').disabled = true;
+    document.getElementById('btnCompararListas').disabled = true;
+    document.getElementById('btnGerarCorrecao').disabled = true;
+    document.getElementById('btnExportarResultado').disabled = true;
+    
+    // Limpar resumos
+    document.getElementById('resumoListaOriginal').innerHTML = '';
+    document.getElementById('resumoArquivoNovo').innerHTML = '';
+    document.getElementById('resultadoComparacao').style.display = 'none';
+}
+
+/**
+ * Mostrar notificação
+ */
+function mostrarNotificacao(mensagem, tipo = 'info') {
+    console.log(`📢 ${tipo.toUpperCase()}: ${mensagem}`);
+    
+    if (typeof window.mostrarNotificacao === 'function') {
+        window.mostrarNotificacao(mensagem, tipo);
+    } else {
+        alert(mensagem);
+    }
+}
+
+console.log('✅ separacao.js carregado - FIRESTORE EXCLUSIVO');

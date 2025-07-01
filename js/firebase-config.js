@@ -1,11 +1,12 @@
 /**
  * firebase-config.js
- * Configuração do Cloud Firestore para o Sistema de Controle de Compras e Recebimento
+ * Configuração EXCLUSIVA do Cloud Firestore
  * 
- * MIGRAÇÃO CONCLUÍDA: Este arquivo agora usa APENAS Cloud Firestore
+ * MIGRAÇÃO COMPLETA: Sistema agora usa APENAS Cloud Firestore
+ * Realtime Database foi REMOVIDO completamente
  */
 
-console.log('firebase-config.js carregado - FIRESTORE ONLY MODE');
+console.log('🔥 firebase-config.js carregado - FIRESTORE EXCLUSIVO');
 
 // Configuração do Firebase
 const firebaseConfig = {
@@ -18,47 +19,47 @@ const firebaseConfig = {
   measurementId: "G-G4S09PBEFB"
 };
 
-// Variável global para controlar se o Firebase foi inicializado
+// Variáveis globais
 let firebaseInitialized = false;
 
-// Função principal de inicialização
+/**
+ * Inicializar Firebase com APENAS Firestore
+ */
 async function initializeFirebase() {
   try {
-    console.log('🔥 Inicializando Firebase com APENAS Firestore...');
+    console.log('🚀 Inicializando Firebase com APENAS Cloud Firestore...');
     
     // Verificar se Firebase está disponível
     if (typeof firebase === 'undefined') {
       throw new Error('Firebase SDK não está carregado. Verifique se os scripts estão incluídos na página.');
     }
     
-    // Inicializar o Firebase somente se ainda não foi inicializado
+    // Inicializar o Firebase se ainda não foi inicializado
     if (!firebase.apps.length) {
       firebase.initializeApp(firebaseConfig);
-      console.log('✅ Firebase App inicializado com sucesso');
-    } else {
-      console.log('✅ Firebase App já estava inicializado');
+      console.log('✅ Firebase App inicializado');
     }
     
     // Verificar se o Firestore está disponível
     if (typeof firebase.firestore !== 'function') {
-      throw new Error('Firebase Firestore SDK não está carregado. Verifique se o script do Firestore está incluído.');
+      throw new Error('Firebase Firestore SDK não está carregado.');
     }
     
     // Criar referência ao Cloud Firestore
     const db = firebase.firestore();
-    console.log('✅ Referência ao Cloud Firestore criada');
+    console.log('✅ Cloud Firestore conectado');
     
-    // Configurações de performance do Firestore
+    // Configurações do Firestore
     try {
       db.settings({
         cacheSizeBytes: firebase.firestore.CACHE_SIZE_UNLIMITED
       });
-      console.log('✅ Configurações de cache aplicadas');
+      console.log('✅ Cache configurado');
     } catch (settingsError) {
-      console.warn('⚠️ Erro ao aplicar configurações de cache:', settingsError);
+      console.warn('⚠️ Erro ao configurar cache:', settingsError);
     }
     
-    // Tentar habilitar persistência offline
+    // Habilitar persistência offline
     try {
       await db.enablePersistence();
       console.log('✅ Persistência offline habilitada');
@@ -67,320 +68,156 @@ async function initializeFirebase() {
         console.warn('⚠️ Múltiplas abas abertas, persistência offline desabilitada');
       } else if (persistenceError.code === 'unimplemented') {
         console.warn('⚠️ Navegador não suporta persistência offline');
-      } else {
-        console.warn('⚠️ Erro ao habilitar persistência:', persistenceError);
       }
     }
     
     // Disponibilizar Firestore globalmente
     window.db = db;
     
-    // Criar dbRef compatível com o código existente usando APENAS Firestore
-    window.dbRef = {
-      // Coleções principais do Firestore
+    // Criar interface para acesso às coleções
+    window.collections = {
       clientes: db.collection('clientes'),
       fornecedores: db.collection('fornecedores'),
       usuarios: db.collection('usuarios'),
-      
-      // Coleções de processos
       separacaoProd: db.collection('SeparacaoProd'),
-      correcaoFinal: db.collection('CorrecaoFinal'),
-      
-      // Emular métodos do Realtime Database para compatibilidade
-      // Mas usando APENAS Firestore por baixo
-      projetos: {
-        child: (path) => ({
-          once: async (eventType) => {
-            if (eventType === 'value') {
-              try {
-                // Parse do path para extrair clienteId e projetoId
-                const pathParts = path.split('/');
-                if (pathParts.length >= 2) {
-                  const clienteId = pathParts[0];
-                  const projetoId = pathParts[1];
-                  
-                  const doc = await db.collection('clientes')
-                    .doc(clienteId)
-                    .collection('projetos')
-                    .doc(projetoId)
-                    .get();
-                  
-                  return {
-                    exists: () => doc.exists,
-                    val: () => doc.exists ? doc.data() : null
-                  };
-                }
-                return { exists: () => false, val: () => null };
-              } catch (error) {
-                console.error('Erro ao buscar projeto:', error);
-                return { exists: () => false, val: () => null };
-              }
-            }
-          },
-          
-          set: async (data) => {
-            try {
-              const pathParts = path.split('/');
-              if (pathParts.length >= 2) {
-                const clienteId = pathParts[0];
-                const projetoId = pathParts[1];
-                
-                const enrichedData = {
-                  ...data,
-                  clienteId: clienteId,
-                  updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-                
-                await db.collection('clientes')
-                  .doc(clienteId)
-                  .collection('projetos')
-                  .doc(projetoId)
-                  .set(enrichedData);
-                
-                return true;
-              }
-              throw new Error('Path inválido para projeto');
-            } catch (error) {
-              console.error('Erro ao salvar projeto:', error);
-              throw error;
-            }
-          },
-          
-          update: async (data) => {
-            try {
-              const pathParts = path.split('/');
-              if (pathParts.length >= 2) {
-                const clienteId = pathParts[0];
-                const projetoId = pathParts[1];
-                
-                const enrichedData = {
-                  ...data,
-                  updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                };
-                
-                await db.collection('clientes')
-                  .doc(clienteId)
-                  .collection('projetos')
-                  .doc(projetoId)
-                  .update(enrichedData);
-                
-                return true;
-              }
-              throw new Error('Path inválido para projeto');
-            } catch (error) {
-              console.error('Erro ao atualizar projeto:', error);
-              throw error;
-            }
-          }
-        })
-      }
+      correcaoFinal: db.collection('CorrecaoFinal')
     };
     
-    // Adicionar métodos de compatibilidade para clientes
-    window.dbRef.clientes.child = (clienteId) => ({
-      once: async (eventType) => {
-        if (eventType === 'value') {
-          try {
-            const doc = await db.collection('clientes').doc(clienteId).get();
-            return {
-              exists: () => doc.exists,
-              val: () => doc.exists ? doc.data() : null
-            };
-          } catch (error) {
-            console.error('Erro ao buscar cliente:', error);
-            return { exists: () => false, val: () => null };
-          }
-        }
-      },
-      
-      update: async (data) => {
-        try {
-          const enrichedData = {
-            ...data,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          };
-          
-          await db.collection('clientes').doc(clienteId).update(enrichedData);
-          return true;
-        } catch (error) {
-          console.error('Erro ao atualizar cliente:', error);
-          throw error;
-        }
-      },
-      
-      set: async (data) => {
-        try {
-          const enrichedData = {
-            ...data,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          };
-          
-          await db.collection('clientes').doc(clienteId).set(enrichedData);
-          return true;
-        } catch (error) {
-          console.error('Erro ao salvar cliente:', error);
-          throw error;
-        }
-      }
-    });
+    console.log('✅ Coleções disponíveis:', Object.keys(window.collections));
     
-    // Adicionar método once para buscar todos os clientes
-    window.dbRef.clientes.once = async (eventType) => {
-      if (eventType === 'value') {
-        try {
-          const snapshot = await db.collection('clientes').get();
-          const data = {};
-          
-          snapshot.forEach(doc => {
-            data[doc.id] = doc.data();
-          });
-          
-          return {
-            exists: () => !snapshot.empty,
-            val: () => snapshot.empty ? null : data,
-            forEach: (callback) => {
-              snapshot.forEach(doc => {
-                callback({
-                  key: doc.id,
-                  val: () => doc.data()
-                });
-              });
-            }
-          };
-        } catch (error) {
-          console.error('Erro ao buscar todos os clientes:', error);
-          return {
-            exists: () => false,
-            val: () => null,
-            forEach: () => {}
-          };
-        }
-      }
-    };
-    
-    console.log('✅ window.dbRef criado e disponível globalmente (FIRESTORE ONLY)');
-    console.log('🔥 dbRef estrutura:', Object.keys(window.dbRef));
-    
-    // Teste de conectividade com Firestore
+    // Teste de conectividade
     try {
       await db.collection('_connectionTest').limit(1).get();
-      console.log('✅ Conectado ao Cloud Firestore com sucesso!');
+      console.log('✅ Conectado ao Cloud Firestore!');
       
       firebaseInitialized = true;
       
-      // Disparar evento personalizado para notificar que o Firebase está pronto
+      // Disparar evento de Firebase pronto
       window.dispatchEvent(new CustomEvent('firebaseReady', { 
-        detail: { db: db, dbRef: window.dbRef } 
+        detail: { db: db, collections: window.collections } 
       }));
       
-      // Chamar callback de conexão se existir
+      // Callback de conexão
       if (typeof window.onFirebaseConnected === 'function') {
         window.onFirebaseConnected();
       }
       
     } catch (connectionError) {
-      console.error('❌ Erro ao conectar com o Firestore:', connectionError);
-      throw new Error('Falha na conectividade com o Firestore: ' + connectionError.message);
+      console.error('❌ Erro de conectividade:', connectionError);
+      throw new Error('Falha na conectividade: ' + connectionError.message);
     }
     
   } catch (error) {
-    console.error('❌ Erro crítico ao inicializar Cloud Firestore:', error);
+    console.error('❌ Erro ao inicializar Firebase:', error);
     
     // Mostrar erro para o usuário
-    const errorMessage = `Erro ao conectar ao banco de dados: ${error.message}`;
+    const errorMessage = `Erro de conexão: ${error.message}`;
     
     if (typeof window.mostrarNotificacao === 'function') {
       window.mostrarNotificacao(errorMessage, 'danger', 10000);
     } else {
-      alert(errorMessage + '\n\nPor favor, recarregue a página.');
+      alert(errorMessage + '\n\nRecarregue a página.');
     }
     
     throw error;
   }
 }
 
-// Utilitários globais para operações do Firestore
-window.FirestoreUtils = {
+/**
+ * Utilitários do Firestore
+ */
+window.FirestoreAPI = {
   
   /**
-   * Criar um item com IDs desnormalizados
+   * Criar cliente
    */
-  createItemWithDenormalizedIds: (itemData, clienteId, projetoId, listaId) => {
-    return {
-      ...itemData,
-      clienteId: clienteId,
-      projetoId: projetoId,
-      listaId: listaId,
+  criarCliente: async (clienteData) => {
+    const docRef = await window.collections.clientes.add({
+      ...clienteData,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
+    });
+    return docRef.id;
   },
   
   /**
-   * Atualizar timestamp de modificação
+   * Buscar cliente por ID
    */
-  updateTimestamp: (updateData) => {
-    return {
+  buscarCliente: async (clienteId) => {
+    const doc = await window.collections.clientes.doc(clienteId).get();
+    return doc.exists ? { id: doc.id, ...doc.data() } : null;
+  },
+  
+  /**
+   * Buscar todos os clientes
+   */
+  buscarTodosClientes: async () => {
+    const snapshot = await window.collections.clientes.get();
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  },
+  
+  /**
+   * Atualizar cliente
+   */
+  atualizarCliente: async (clienteId, updateData) => {
+    await window.collections.clientes.doc(clienteId).update({
       ...updateData,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
-  },
-  
-  /**
-   * Buscar itens por status usando collection group
-   */
-  getItensByStatus: async (status, additionalFilters = {}) => {
-    const db = window.db;
-    let query = db.collectionGroup('itens').where('status', '==', status);
-    
-    // Adicionar filtros adicionais
-    Object.entries(additionalFilters).forEach(([field, value]) => {
-      query = query.where(field, '==', value);
     });
-    
-    const snapshot = await query.get();
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      path: doc.ref.path,
-      ...doc.data()
-    }));
   },
   
   /**
-   * Buscar todos os itens de um cliente específico
+   * Criar projeto para um cliente
    */
-  getItensByCliente: async (clienteId) => {
-    const db = window.db;
-    const query = db.collectionGroup('itens').where('clienteId', '==', clienteId);
-    const snapshot = await query.get();
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      path: doc.ref.path,
-      ...doc.data()
-    }));
+  criarProjeto: async (clienteId, projetoData) => {
+    const docRef = await window.collections.clientes
+      .doc(clienteId)
+      .collection('projetos')
+      .add({
+        ...projetoData,
+        clienteId: clienteId,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    return docRef.id;
   },
   
   /**
-   * Atualizar status de um item
+   * Buscar projetos de um cliente
    */
-  updateItemStatus: async (itemPath, newStatus, additionalData = {}) => {
-    const db = window.db;
-    const updateData = window.FirestoreUtils.updateTimestamp({
-      status: newStatus,
-      ...additionalData
-    });
-    
-    return db.doc(itemPath).update(updateData);
+  buscarProjetosCliente: async (clienteId) => {
+    const snapshot = await window.collections.clientes
+      .doc(clienteId)
+      .collection('projetos')
+      .get();
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   },
   
   /**
-   * Salvar múltiplos itens usando batch
+   * Criar lista para um projeto
    */
-  saveItemsBatch: async (items, clienteId, projetoId, listaId) => {
-    const db = window.db;
-    const batch = db.batch();
-    const itemsRef = db.collection('clientes')
+  criarLista: async (clienteId, projetoId, listaData) => {
+    const docRef = await window.collections.clientes
+      .doc(clienteId)
+      .collection('projetos')
+      .doc(projetoId)
+      .collection('listas')
+      .add({
+        ...listaData,
+        clienteId: clienteId,
+        projetoId: projetoId,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    return docRef.id;
+  },
+  
+  /**
+   * Salvar itens em lote (batch)
+   */
+  salvarItensLote: async (clienteId, projetoId, listaId, itens) => {
+    const batch = window.db.batch();
+    const itensRef = window.collections.clientes
       .doc(clienteId)
       .collection('projetos')
       .doc(projetoId)
@@ -388,27 +225,109 @@ window.FirestoreUtils = {
       .doc(listaId)
       .collection('itens');
     
-    items.forEach(itemData => {
-      const itemRef = itemsRef.doc();
-      const enrichedItem = window.FirestoreUtils.createItemWithDenormalizedIds(
-        itemData, clienteId, projetoId, listaId
-      );
-      batch.set(itemRef, enrichedItem);
+    itens.forEach(item => {
+      const itemRef = itensRef.doc();
+      batch.set(itemRef, {
+        ...item,
+        clienteId: clienteId,
+        projetoId: projetoId,
+        listaId: listaId,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
     });
     
-    return batch.commit();
+    await batch.commit();
+    console.log(`✅ ${itens.length} itens salvos em lote`);
+  },
+  
+  /**
+   * Buscar itens por status usando collectionGroup
+   */
+  buscarItensPorStatus: async (status) => {
+    const snapshot = await window.db.collectionGroup('itens')
+      .where('status', '==', status)
+      .get();
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      path: doc.ref.path,
+      ...doc.data()
+    }));
+  },
+  
+  /**
+   * Buscar itens de um cliente
+   */
+  buscarItensCliente: async (clienteId) => {
+    const snapshot = await window.db.collectionGroup('itens')
+      .where('clienteId', '==', clienteId)
+      .get();
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      path: doc.ref.path,
+      ...doc.data()
+    }));
+  },
+  
+  /**
+   * Atualizar status de item
+   */
+  atualizarStatusItem: async (itemPath, novoStatus, dadosAdicionais = {}) => {
+    const itemRef = window.db.doc(itemPath);
+    await itemRef.update({
+      status: novoStatus,
+      ...dadosAdicionais,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  },
+  
+  /**
+   * Atualizar múltiplos itens em lote
+   */
+  atualizarItensLote: async (atualizacoes) => {
+    const batch = window.db.batch();
+    
+    atualizacoes.forEach(({ path, dados }) => {
+      const itemRef = window.db.doc(path);
+      batch.update(itemRef, {
+        ...dados,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    });
+    
+    await batch.commit();
+    console.log(`✅ ${atualizacoes.length} itens atualizados em lote`);
+  },
+  
+  /**
+   * Buscar fornecedores
+   */
+  buscarFornecedores: async () => {
+    const snapshot = await window.collections.fornecedores.get();
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  },
+  
+  /**
+   * Criar fornecedor
+   */
+  criarFornecedor: async (fornecedorData) => {
+    const docRef = await window.collections.fornecedores.add({
+      ...fornecedorData,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    return docRef.id;
   }
 };
 
-// Verificar se o DOM está carregado antes de inicializar
+// Verificar se o DOM está carregado
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initializeFirebase);
 } else {
-  // DOM já carregado, inicializar imediatamente
   initializeFirebase();
 }
 
-// Exportar função de inicialização para uso manual se necessário
+// Exportar função de inicialização
 window.initializeFirebase = initializeFirebase;
 
 console.log('✅ firebase-config.js carregado - aguardando inicialização do Firestore...');
