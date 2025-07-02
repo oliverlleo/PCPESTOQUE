@@ -653,26 +653,56 @@ async function salvarCadastro() {
       projetosParaSalvar[tipo] = tipoProjeto;
     });
 
-    // 3. Salva os dados do cliente e os projetos
+    // 3. Salva os dados do cliente
+    let effectiveClientId = clienteId;
+
     if (isEditing) {
-      // Atualiza um documento existente
       await db.collection('clientes').doc(clienteId).update(clienteData);
-      await db.collection('projetos').doc(clienteId).update(projetosParaSalvar);
     } else {
-      // Adiciona um novo documento com um ID gerado automaticamente
-      // Primeiro, salva os dados básicos do cliente para obter o ID
       const docRef = await db.collection('clientes').add(clienteData);
-      // Em seguida, usa esse ID para salvar os projetos
-      await db.collection('projetos').doc(docRef.id).set(projetosParaSalvar);
-      // É importante atualizar o clienteId para o novo ID gerado pelo Firestore para o processamento de arquivos
-      clienteId = docRef.id;
+      effectiveClientId = docRef.id; // Update clientID for new client
     }
 
-    // *** FIM DA CORREÇÃO LÓGICA ***
+    // 4. Salva cada projeto como um documento separado
+    // Para edição: estratégia simplificada de deletar os antigos e adicionar os atuais.
+    // Idealmente, seria uma atualização mais granular.
+    if (isEditing) {
+        const existingProjetosSnapshot = await db.collection('projetos').where('clienteId', '==', effectiveClientId).get();
+        const batch = db.batch();
+        existingProjetosSnapshot.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+    }
 
-    // 4. Processa os arquivos de listas
+    // Adiciona os projetos atuais (seja para novo cliente ou após limpar os antigos para cliente existente)
+    for (const tipo of tiposProjetoSelecionados) {
+        const projetoDetalhes = projetosParaSalvar[tipo];
+        if (!projetoDetalhes) continue;
+
+        const projetoDocData = {
+            ...projetoDetalhes, // Contém dados como terceirizado, empresa, listas (ainda como objeto) etc.
+            clienteId: effectiveClientId,
+            tipo: tipo, // Armazena o tipo de projeto (PVC, Aluminio etc.)
+            ultimaAtualizacao: Date.now()
+        };
+        if (!isEditing || !projetoDetalhes.dataCriacao) { // Adiciona dataCriacao para novos projetos ou se não existir
+            projetoDocData.dataCriacao = Date.now();
+        }
+
+        await db.collection('projetos').add(projetoDocData);
+    }
+
+    // Atualiza a variável clienteId para ser usada no processamento de arquivos.
+    // Esta variável é usada pela função processarArquivosListas.
+    clienteId = effectiveClientId;
+
+    // *** FIM DA CORREÇÃO LÓGICA PARA PROJETOS INDIVIDUAIS ***
+
+    // 5. Processa os arquivos de listas
+    // A função processarArquivosListas precisará ser ajustada internamente
+    // para lidar com a nova estrutura de projetos, se ela salva metadados de arquivos DENTRO dos documentos de projeto.
+    // Por ora, a assinatura da chamada permanece, assumindo que clienteId e tipo são suficientes para ela operar.
     await processarArquivosListas(
-      clienteId,
+      effectiveClientId, // Usar o ID de cliente correto
       tiposProjetoSelecionados,
       listasPersonalizadas
     );
