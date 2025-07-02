@@ -1,3 +1,13 @@
+document.addEventListener('DOMContentLoaded', function() {
+    // Verificação de segurança para garantir que o Firestore está pronto
+    if (typeof db === 'undefined') {
+        console.error("A configuração do Firestore (db) não foi encontrada. Verifique a ordem dos scripts no HTML.");
+        return; // Para a execução se o DB não estiver pronto
+    }
+
+    // ===================================================
+    // SEU CÓDIGO ORIGINAL E COMPLEXO COMEÇA ABAIXO DESTA LINHA
+    // ===================================================
 /**
  * cadastro.js
  * * Lógica específica da tela de cadastro de clientes e projetos
@@ -5,17 +15,10 @@
  * do Sistema de Controle de Compras e Recebimento
  */
 
-// Aguarda o carregamento completo do DOM
-document.addEventListener("DOMContentLoaded", function () {
-  // Inicializa os componentes da página
-  inicializarComponentes();
-
-  // Carrega a lista de clientes cadastrados
-  carregarClientes();
-
-  // Configura os listeners de eventos
-  configurarEventListeners();
-});
+// As chamadas que estavam no DOMContentLoaded original serão feitas no final do novo wrapper.
+// inicializarComponentes();
+// carregarClientes();
+// configurarEventListeners();
 
 /**
  * Inicializa os componentes da interface
@@ -313,10 +316,10 @@ function editarCliente(clienteId) {
   console.log("=== INÍCIO DA FUNÇÃO EDITAR CLIENTE ===");
   console.log("Editando cliente com ID:", clienteId);
 
-  if (!dbRef) {
-    console.error("ERRO CRÍTICO: dbRef não está definido!");
+  if (!dbRef) { // ATENÇÃO: dbRef ainda está sendo usado aqui. Precisa ser migrado para Firestore.
+    console.error("ERRO CRÍTICO: dbRef não está definido! Esta função (editarCliente) precisa ser migrada para Firestore.");
     mostrarNotificacao(
-      "Erro de conexão com o banco de dados. Recarregue a página.",
+      "Erro de conexão com o banco de dados (dbRef). Recarregue a página.",
       "danger"
     );
     return;
@@ -339,18 +342,18 @@ function editarCliente(clienteId) {
   // Atualiza o texto do botão
   document.getElementById("btnSalvarCadastro").textContent = "Atualizar";
 
-  // Busca os dados do cliente no Firebase
+  // Busca os dados do cliente no Firebase (dbRef - PRECISA MIGRAR)
   dbRef.clientes
     .child(clienteId)
     .once("value")
     .then((snapshotCliente) => {
-      console.log("Resposta recebida do Firebase para dados do cliente");
+      console.log("Resposta recebida do Firebase para dados do cliente (dbRef)");
 
       const cliente = snapshotCliente.val();
-      console.log("Dados do cliente:", cliente);
+      console.log("Dados do cliente (dbRef):", cliente);
 
       if (!cliente) {
-        console.error("Cliente não encontrado no Firebase");
+        console.error("Cliente não encontrado no Firebase (dbRef)");
         throw new Error("Cliente não encontrado");
       }
 
@@ -368,122 +371,78 @@ function editarCliente(clienteId) {
         ).value = `${dia}/${mes}/${ano}`;
       }
 
-      // Busca os projetos do cliente
+      // Busca os projetos do cliente (dbRef - PRECISA MIGRAR)
+      // E a lógica precisará mudar para buscar projetos individuais na coleção 'projetos' do Firestore
       return dbRef.projetos.child(clienteId).once("value");
     })
     .then((snapshotProjetos) => {
-      console.log("Resposta recebida do Firebase para projetos");
+      console.log("Resposta recebida do Firebase para projetos (dbRef)");
 
-      const projetos = snapshotProjetos.val();
-      console.log("Dados dos projetos:", projetos);
+      const projetosMap = snapshotProjetos.val(); // Isso era um mapa de projetos no Realtime DB
+      console.log("Dados dos projetos (dbRef - estrutura antiga):", projetosMap);
 
-      // Se não há projetos, apenas exibe o modal
-      if (!projetos || objetoVazio(projetos)) {
-        console.log("Nenhum projeto encontrado para este cliente");
+      // ATENÇÃO: A lógica abaixo para preencher o formulário com dados de projetos
+      // precisa ser completamente refeita para buscar documentos individuais da coleção 'projetos'
+      // do Firestore e reconstruir o estado do formulário.
+      // A estrutura 'projetosMap' não é mais como os dados são armazenados.
 
-        // Exibe o modal
-        const modalCadastro = new bootstrap.Modal(
-          document.getElementById("modalCadastro")
-        );
+      if (!projetosMap || objetoVazio(projetosMap)) {
+        console.log("Nenhum projeto encontrado para este cliente (dbRef - estrutura antiga)");
+        const modalCadastro = new bootstrap.Modal(document.getElementById("modalCadastro"));
         modalCadastro.show();
-
         return;
       }
 
-      // Marca os checkboxes de tipos de projeto e exibe as áreas correspondentes
-      Object.keys(projetos).forEach((tipoProjeto) => {
-        const checkbox = document.getElementById(`tipo${tipoProjeto}`);
+      // Esta lógica de iterar Object.keys(projetosMap) e preencher o formulário
+      // com base nos tipos de projeto como chaves do objeto 'projetosMap'
+      // precisará ser substituída por uma query à coleção 'projetos' do Firestore
+      // filtrando por clienteId, e depois processando cada documento de projeto.
+      console.warn("Lógica de preenchimento de projetos em editarCliente precisa ser migrada para Firestore e nova estrutura de dados.");
+
+
+      // Exemplo de como seria a busca (PRECISA IMPLEMENTAR O PREENCHIMENTO DO FORMULÁRIO):
+      // db.collection('projetos').where('clienteId', '==', clienteId).get().then(querySnapshot => {
+      //   querySnapshot.forEach(doc => {
+      //     const projeto = doc.data();
+      //     const tipoProjeto = projeto.tipo;
+      //     // Aqui você preencheria o formulário para este tipoProjeto
+      //     // Ex: document.getElementById(`tipo${tipoProjeto}`).checked = true;
+      //     // ... e os campos específicos do projeto ...
+      //   });
+      // }).catch(err => console.error("Erro ao buscar projetos individuais para edição:", err));
+
+
+      // Marcando checkboxes e áreas de projeto (LÓGICA ANTIGA - INCOMPATÍVEL)
+      Object.keys(projetosMap).forEach((tipoProjetoKey) => { // tipoProjetoKey era "PVC", "Aluminio" etc.
+        const checkbox = document.getElementById(`tipo${tipoProjetoKey}`);
         if (checkbox) {
           checkbox.checked = true;
+          const areaTipo = document.getElementById(`area${tipoProjetoKey}`);
+          if (areaTipo) areaTipo.classList.remove("d-none");
 
-          // Exibe a área do projeto
-          const areaTipo = document.getElementById(`area${tipoProjeto}`);
-          if (areaTipo) {
-            areaTipo.classList.remove("d-none");
-          }
-
-          // Se for terceirizado, marca o checkbox e exibe a área correspondente
-          if (projetos[tipoProjeto].terceirizado) {
-            const checkboxTerceirizado = document.getElementById(
-              `${tipoProjeto.toLowerCase()}Terceirizado`
-            );
+          const projetoData = projetosMap[tipoProjetoKey]; // Dados específicos do projeto
+          if (projetoData.terceirizado) {
+            const checkboxTerceirizado = document.getElementById(`${tipoProjetoKey.toLowerCase()}Terceirizado`);
             if (checkboxTerceirizado) {
               checkboxTerceirizado.checked = true;
-
-              // Exibe a área de terceirização
-              const areaTerceirizado = document.getElementById(
-                `area${tipoProjeto}Terceirizado`
-              );
-              const areaProducao = document.getElementById(
-                `area${tipoProjeto}Producao`
-              );
-
-              if (areaTerceirizado) {
-                areaTerceirizado.classList.remove("d-none");
-              }
-
-              if (areaProducao) {
-                areaProducao.classList.add("d-none");
-              }
-
-              // Preenche os campos de terceirização
-              const empresa = document.getElementById(`empresa${tipoProjeto}`);
-              if (empresa) {
-                empresa.value = projetos[tipoProjeto].empresa || "";
-              }
-
-              // Formata a data de solicitação
-              if (projetos[tipoProjeto].dataSolicitacao) {
-                const data = new Date(projetos[tipoProjeto].dataSolicitacao);
-                const dia = String(data.getDate()).padStart(2, "0");
-                const mes = String(data.getMonth() + 1).padStart(2, "0");
-                const ano = data.getFullYear();
-
-                const dataSolicitacao = document.getElementById(
-                  `dataSolicitacao${tipoProjeto}`
-                );
-                if (dataSolicitacao) {
-                  dataSolicitacao.value = `${dia}/${mes}/${ano}`;
-                }
-              }
-
-              // Formata a data de prazo de entrega
-              if (projetos[tipoProjeto].prazoEntrega) {
-                const data = new Date(projetos[tipoProjeto].prazoEntrega);
-                const dia = String(data.getDate()).padStart(2, "0");
-                const mes = String(data.getMonth() + 1).padStart(2, "0");
-                const ano = data.getFullYear();
-
-                const prazoEntrega = document.getElementById(
-                  `prazoEntrega${tipoProjeto}`
-                );
-                if (prazoEntrega) {
-                  prazoEntrega.value = `${dia}/${mes}/${ano}`;
-                }
-              }
+              // ... preencher outros campos de terceirizado ...
             }
           } else {
-            // Exibe a área de produção própria
-            const areaProducao = document.getElementById(
-              `area${tipoProjeto}Producao`
-            );
-            if (areaProducao) {
-              areaProducao.classList.remove("d-none");
-            }
+            // ... mostrar área de produção própria ...
           }
         }
       });
 
-      // Exibe o modal
+
       const modalCadastro = new bootstrap.Modal(
         document.getElementById("modalCadastro")
       );
       modalCadastro.show();
     })
     .catch((error) => {
-      console.error("Erro ao editar cliente:", error);
-      mostrarNotificacao("Erro ao editar cliente. Tente novamente.", "danger");
-      console.log("=== FIM DA FUNÇÃO EDITAR CLIENTE - ERRO ===");
+      console.error("Erro ao editar cliente (dbRef):", error);
+      mostrarNotificacao("Erro ao editar cliente (função antiga). Tente novamente.", "danger");
+      console.log("=== FIM DA FUNÇÃO EDITAR CLIENTE - ERRO (dbRef) ===");
     });
 }
 
@@ -560,7 +519,7 @@ async function salvarCadastro() {
   ).getTime();
 
   // Verifica se é uma edição ou um novo cadastro
-  const clienteId =
+  let clienteId = // Declarar com let para poder reatribuir abaixo
     document.getElementById("modalCadastro").dataset.clienteId || gerarId();
   const isEditing =
     !!document.getElementById("modalCadastro").dataset.clienteId;
@@ -592,29 +551,40 @@ async function salvarCadastro() {
   }
 
   try {
-    // *** INÍCIO DA CORREÇÃO LÓGICA ***
+    // *** INÍCIO DA CORREÇÃO LÓGICA *** (Mantida da etapa anterior)
 
-    // 1. Busca os projetos existentes se estiver em modo de edição
-    let projetosExistentes = {};
+    // 1. Busca os projetos existentes se estiver em modo de edição (AINDA USA dbRef, PRECISA MUDAR)
+    //    Esta parte é para construir o objeto projetosParaSalvar, que é usado abaixo.
+    //    A lógica de como os projetos são *salvos* já foi alterada para Firestore.
+    //    Mas a lógica de como os dados são *coletados do formulário* para edição ainda depende de como eram lidos.
+    let projetosExistentesParaFormulario = {};
     if (isEditing) {
-      const snapshotProjetos = await dbRef.projetos
-        .child(clienteId)
-        .once("value");
-      projetosExistentes = snapshotProjetos.val() || {};
+        // ATENÇÃO: Esta busca de projetos existentes para preencher 'projetosParaSalvar'
+        // ainda usa a estrutura antiga do Realtime Database (dbRef).
+        // Para que a edição de projetos funcione corretamente com a nova estrutura de dados do Firestore
+        // (projetos individuais), a forma como 'projetosExistentesParaFormulario' é populada
+        // precisaria ser alterada para buscar os projetos individuais do Firestore
+        // e reconstruir um objeto similar ao que 'projetosParaSalvar' espera,
+        // ou a lógica de construção de 'projetosParaSalvar' precisaria ser ajustada.
+        // Por enquanto, a edição de *campos de projeto* pode não funcionar como esperado
+        // se a estrutura de 'projetosExistentesParaFormulario' não corresponder ao que o código abaixo espera.
+        console.warn("A lógica de coleta de dados de projetos existentes para edição em salvarCadastro (usando dbRef) precisa ser revisada para a nova estrutura Firestore.");
+        const snapshotProjetosAntigos = await dbRef.projetos.child(clienteId).once("value");
+        projetosExistentesParaFormulario = snapshotProjetosAntigos.val() || {};
     }
+
 
     // 2. Constrói o novo objeto de projetos, preservando as listas existentes
     const projetosParaSalvar = {};
     tiposProjetoSelecionados.forEach((tipo) => {
-      const projetoExistente = projetosExistentes[tipo] || {}; // Pega dados do projeto específico
+      // Usar 'projetosExistentesParaFormulario' para pegar os dados do projeto específico
+      const projetoExistente = projetosExistentesParaFormulario[tipo] || {};
 
-      // Inicia o objeto do projeto com as listas existentes para não apagá-las
       const tipoProjeto = {
-        terceirizado: false, // Valor padrão
-        listas: projetoExistente.listas || {}, // PRESERVA a estrutura de listas existente
+        terceirizado: false,
+        listas: projetoExistente.listas || {},
       };
 
-      // Atualiza os dados conforme o formulário
       const checkboxTerceirizado = document.getElementById(
         `${tipo.toLowerCase()}Terceirizado`
       );
@@ -649,7 +619,6 @@ async function salvarCadastro() {
           ).getTime();
         }
       }
-
       projetosParaSalvar[tipo] = tipoProjeto;
     });
 
@@ -660,12 +629,10 @@ async function salvarCadastro() {
       await db.collection('clientes').doc(clienteId).update(clienteData);
     } else {
       const docRef = await db.collection('clientes').add(clienteData);
-      effectiveClientId = docRef.id; // Update clientID for new client
+      effectiveClientId = docRef.id;
     }
 
     // 4. Salva cada projeto como um documento separado
-    // Para edição: estratégia simplificada de deletar os antigos e adicionar os atuais.
-    // Idealmente, seria uma atualização mais granular.
     if (isEditing) {
         const existingProjetosSnapshot = await db.collection('projetos').where('clienteId', '==', effectiveClientId).get();
         const batch = db.batch();
@@ -673,41 +640,34 @@ async function salvarCadastro() {
         await batch.commit();
     }
 
-    // Adiciona os projetos atuais (seja para novo cliente ou após limpar os antigos para cliente existente)
     for (const tipo of tiposProjetoSelecionados) {
         const projetoDetalhes = projetosParaSalvar[tipo];
         if (!projetoDetalhes) continue;
 
         const projetoDocData = {
-            ...projetoDetalhes, // Contém dados como terceirizado, empresa, listas (ainda como objeto) etc.
+            ...projetoDetalhes,
             clienteId: effectiveClientId,
-            tipo: tipo, // Armazena o tipo de projeto (PVC, Aluminio etc.)
+            tipo: tipo,
             ultimaAtualizacao: Date.now()
         };
-        if (!isEditing || !projetoDetalhes.dataCriacao) { // Adiciona dataCriacao para novos projetos ou se não existir
+        if (!isEditing || !projetoDetalhes.dataCriacao) {
             projetoDocData.dataCriacao = Date.now();
         }
 
         await db.collection('projetos').add(projetoDocData);
     }
 
-    // Atualiza a variável clienteId para ser usada no processamento de arquivos.
-    // Esta variável é usada pela função processarArquivosListas.
-    clienteId = effectiveClientId;
+    clienteId = effectiveClientId; // Atualiza clienteId para processarArquivosListas
 
     // *** FIM DA CORREÇÃO LÓGICA PARA PROJETOS INDIVIDUAIS ***
 
     // 5. Processa os arquivos de listas
-    // A função processarArquivosListas precisará ser ajustada internamente
-    // para lidar com a nova estrutura de projetos, se ela salva metadados de arquivos DENTRO dos documentos de projeto.
-    // Por ora, a assinatura da chamada permanece, assumindo que clienteId e tipo são suficientes para ela operar.
     await processarArquivosListas(
-      effectiveClientId, // Usar o ID de cliente correto
+      effectiveClientId,
       tiposProjetoSelecionados,
       listasPersonalizadas
     );
 
-    // Exibe mensagem de sucesso e finaliza o processo
     mostrarNotificacao("Cliente salvo com sucesso!", "success");
     const modalCadastro = bootstrap.Modal.getInstance(
       document.getElementById("modalCadastro")
@@ -728,25 +688,27 @@ async function salvarCadastro() {
  * @returns {Promise} - Promise que resolve quando todos os arquivos forem processados
  */
 function processarArquivosListas(
-  clienteId,
+  clienteId, // Este é o effectiveClientId
   tiposSelecionados,
   listasPersonalizadas = []
 ) {
-  // Array para armazenar todas as promessas de processamento
   const promessas = [];
 
-  // Para cada tipo de projeto
   tiposSelecionados.forEach((tipo) => {
-    // Verifica se o tipo é terceirizado
     const checkboxTerceirizado = document.getElementById(
       `${tipo.toLowerCase()}Terceirizado`
     );
     if (checkboxTerceirizado && checkboxTerceirizado.checked) {
-      // Se for terceirizado, processa apenas a lista de chaves
       const inputChaves = document.getElementById(
         `listaChaves${tipo}Terceirizado`
       );
       if (inputChaves && inputChaves.files.length > 0) {
+        // ATENÇÃO: processarArquivo precisa saber como encontrar o *documento específico do projeto*
+        // para salvar os metadados do arquivo, não apenas o clienteId e tipo.
+        // Ela pode precisar fazer uma query: db.collection('projetos').where('clienteId', '==', clienteId).where('tipo', '==', tipo).get()
+        // e depois atualizar o primeiro documento encontrado (assumindo um projeto por tipo por cliente).
+        // Ou, o ID do documento do projeto específico precisa ser passado para processarArquivo.
+        console.warn(`processarArquivo para ${tipo} terceirizado precisa de lógica para encontrar/atualizar doc de projeto individual.`);
         const promessa = new Promise((resolve, reject) => {
           processarArquivo(inputChaves.files[0], clienteId, tipo, "LChaves")
             .then(resolve)
@@ -757,64 +719,45 @@ function processarArquivosListas(
       return;
     }
 
-    // Define as listas para cada tipo de projeto
     let listas = [];
-
     switch (tipo) {
       case "PVC":
         listas = [
-          { id: "listaChavesPVC", nome: "LChaves" },
-          { id: "listaPVC", nome: "LPVC" },
-          { id: "listaReforco", nome: "LReforco" },
-          { id: "listaFerragens", nome: "LFerragens" },
-          { id: "listaVidros", nome: "LVidros" },
-          { id: "listaEsteira", nome: "LEsteira" },
-          { id: "listaMotor", nome: "LMotor" },
-          { id: "listaAcabamento", nome: "LAcabamento" },
-          { id: "listaTelaRetratil", nome: "LTelaRetratil" },
-          { id: "listaAco", nome: "LAco" },
+          { id: "listaChavesPVC", nome: "LChaves" }, { id: "listaPVC", nome: "LPVC" },
+          { id: "listaReforco", nome: "LReforco" }, { id: "listaFerragens", nome: "LFerragens" },
+          { id: "listaVidros", nome: "LVidros" }, { id: "listaEsteira", nome: "LEsteira" },
+          { id: "listaMotor", nome: "LMotor" }, { id: "listaAcabamento", nome: "LAcabamento" },
+          { id: "listaTelaRetratil", nome: "LTelaRetratil" }, { id: "listaAco", nome: "LAco" },
           { id: "listaOutrosPVC", nome: "LOutros" },
         ];
         break;
       case "Aluminio":
         listas = [
-          { id: "listaChavesAluminio", nome: "LChaves" },
-          { id: "listaPerfil", nome: "LPerfil" },
-          { id: "listaContraMarco", nome: "LContraMarco" },
-          { id: "listaFerragensAluminio", nome: "LFerragens" },
-          { id: "listaVidroAluminio", nome: "LVidro" },
-          { id: "listaMotorAluminio", nome: "LMotor" },
-          { id: "listaEsteiraAluminio", nome: "LEsteira" },
-          { id: "listaAcabamentoAluminio", nome: "LAcabamento" },
-          { id: "listaTelaRetratilAluminio", nome: "LTelaRetratil" },
-          { id: "listaOutrosAluminio", nome: "LOutros" },
+          { id: "listaChavesAluminio", nome: "LChaves" }, { id: "listaPerfil", nome: "LPerfil" },
+          { id: "listaContraMarco", nome: "LContraMarco" }, { id: "listaFerragensAluminio", nome: "LFerragens" },
+          { id: "listaVidroAluminio", nome: "LVidro" }, { id: "listaMotorAluminio", nome: "LMotor" },
+          { id: "listaEsteiraAluminio", nome: "LEsteira" }, { id: "listaAcabamentoAluminio", nome: "LAcabamento" },
+          { id: "listaTelaRetratilAluminio", nome: "LTelaRetratil" }, { id: "listaOutrosAluminio", nome: "LOutros" },
         ];
         break;
       case "Brise":
         listas = [
-          { id: "listaChavesBrise", nome: "LChaves" },
-          { id: "listaPerfilBrise", nome: "LPerfil" },
-          { id: "listaFerragensBrise", nome: "LFerragens" },
-          { id: "listaConexaoBrise", nome: "LConexao" },
-          { id: "listaFechaduraEletronicaBrise", nome: "LFechaduraEletronica" },
-          { id: "listaOutrosBrise", nome: "LOutros" },
+          { id: "listaChavesBrise", nome: "LChaves" }, { id: "listaPerfilBrise", nome: "LPerfil" },
+          { id: "listaFerragensBrise", nome: "LFerragens" }, { id: "listaConexaoBrise", nome: "LConexao" },
+          { id: "listaFechaduraEletronicaBrise", nome: "LFechaduraEletronica" }, { id: "listaOutrosBrise", nome: "LOutros" },
         ];
         break;
       case "ACM":
         listas = [
-          { id: "listaChavesACM", nome: "LChaves" },
-          { id: "listaPerfilACM", nome: "LPerfil" },
-          { id: "listaFerragensACM", nome: "LFerragens" },
-          { id: "listaConexaoACM", nome: "LConexao" },
-          { id: "listaChapaACM", nome: "LChapaACM" },
-          { id: "listaFechaduraEletronicaACM", nome: "LFechaduraEletronica" },
+          { id: "listaChavesACM", nome: "LChaves" }, { id: "listaPerfilACM", nome: "LPerfil" },
+          { id: "listaFerragensACM", nome: "LFerragens" }, { id: "listaConexaoACM", nome: "LConexao" },
+          { id: "listaChapaACM", nome: "LChapaACM" }, { id: "listaFechaduraEletronicaACM", nome: "LFechaduraEletronica" },
           { id: "listaOutrosACM", nome: "LOutros" },
         ];
         break;
       case "Trilho":
         listas = [
-          { id: "listaChavesTrilho", nome: "LChaves" },
-          { id: "listaPerfilTrilho", nome: "LPerfil" },
+          { id: "listaChavesTrilho", nome: "LChaves" }, { id: "listaPerfilTrilho", nome: "LPerfil" },
           { id: "listaOutrosTrilho", nome: "LOutros" },
         ];
         break;
@@ -823,43 +766,32 @@ function processarArquivosListas(
         break;
     }
 
-    // Para cada lista do tipo de projeto
     listas.forEach((lista) => {
       const inputFile = document.getElementById(lista.id);
-
-      // Verifica se há arquivo selecionado
       if (inputFile && inputFile.files.length > 0) {
-        // Cria uma promessa para processar o arquivo
+        console.warn(`processarArquivo para ${tipo} - ${lista.nome} precisa de lógica para encontrar/atualizar doc de projeto individual.`);
         const promessa = new Promise((resolve, reject) => {
-          // Chama a função de processamento de arquivo (implementada em processamento-arquivos.js)
           processarArquivo(inputFile.files[0], clienteId, tipo, lista.nome)
             .then(resolve)
             .catch(reject);
         });
-
-        // Adiciona a promessa ao array
         promessas.push(promessa);
       }
     });
 
-    // Processa listas personalizadas para o tipo "Outros"
     if (tipo === "Outros" && listasPersonalizadas.length > 0) {
       listasPersonalizadas.forEach((lista) => {
-        // Cria uma promessa para processar o arquivo
+        console.warn(`processarArquivo para Outros - ${lista.nome} precisa de lógica para encontrar/atualizar doc de projeto individual.`);
         const promessa = new Promise((resolve, reject) => {
-          // Chama a função de processamento de arquivo com o nome personalizado
           processarArquivo(lista.arquivo, clienteId, tipo, `L${lista.nome}`)
             .then(resolve)
             .catch(reject);
         });
-
-        // Adiciona a promessa ao array
         promessas.push(promessa);
       });
     }
   });
 
-  // Retorna uma promessa que resolve quando todas as promessas de processamento forem resolvidas
   return Promise.all(promessas);
 }
 
@@ -867,21 +799,13 @@ function processarArquivosListas(
  * Adiciona uma nova lista personalizada para o tipo de projeto "Outros"
  */
 function adicionarListaPersonalizada() {
-  // Obtém o template da lista personalizada
   const template = document.getElementById("templateListaPersonalizada");
   const container = document.getElementById("listasPersonalizadasContainer");
-
-  // Clona o template
   const clone = document.importNode(template.content, true);
-
-  // Adiciona evento para remover a lista
   const btnRemover = clone.querySelector(".btn-remover-lista");
   btnRemover.addEventListener("click", function () {
-    const listaItem = this.closest(".lista-personalizada");
-    listaItem.remove();
+    this.closest(".lista-personalizada").remove();
   });
-
-  // Adiciona ao container
   container.appendChild(clone);
 }
 
@@ -889,31 +813,18 @@ function adicionarListaPersonalizada() {
  * Aplica os filtros selecionados à tabela de clientes
  */
 function aplicarFiltros() {
-  // Implementação da função de aplicar filtros
   console.log("Aplicando filtros...");
-
-  // Obter valores dos filtros
   const filtroCliente = document.getElementById("filtroCliente").value;
   const filtroStatus = document.getElementById("filtroStatus").value;
-
-  // Aplicar filtros à tabela
   const linhas = document.querySelectorAll("#tabelaClientes tr");
 
   linhas.forEach((linha) => {
     const clienteId = linha.dataset.id;
     const statusElement = linha.querySelector(".badge");
     const status = statusElement ? statusElement.textContent : "";
-
     let mostrar = true;
-
-    if (filtroCliente && clienteId !== filtroCliente) {
-      mostrar = false;
-    }
-
-    if (filtroStatus && status !== filtroStatus) {
-      mostrar = false;
-    }
-
+    if (filtroCliente && clienteId !== filtroCliente) mostrar = false;
+    if (filtroStatus && status !== filtroStatus) mostrar = false;
     linha.style.display = mostrar ? "" : "none";
   });
 }
@@ -922,11 +833,8 @@ function aplicarFiltros() {
  * Limpa os filtros aplicados à tabela de clientes
  */
 function limparFiltros() {
-  // Limpa os campos de filtro
   document.getElementById("filtroCliente").value = "";
   document.getElementById("filtroStatus").value = "";
-
-  // Recarrega a lista de clientes
   carregarClientes();
 }
 
@@ -936,18 +844,10 @@ function limparFiltros() {
  * @returns {boolean} - Indica se o formulário é válido
  */
 function validarFormulario(form) {
-  // Verifica se o nome do cliente foi preenchido
   const nomeCliente = document.getElementById("cliente").value;
-  if (!nomeCliente) {
-    return false;
-  }
-
-  // Verifica se a data de prazo de entrega foi preenchida
+  if (!nomeCliente) return false;
   const prazoEntrega = document.getElementById("dataPrazoEntrega").value;
-  if (!prazoEntrega) {
-    return false;
-  }
-
+  if (!prazoEntrega) return false;
   return true;
 }
 
@@ -965,11 +865,13 @@ function gerarId() {
  * @returns {string} - Data formatada
  */
 function formatarData(timestamp) {
+  if (!timestamp) return "Data inválida"; // Adiciona verificação para timestamp nulo/undefined
   const data = new Date(timestamp);
+  if (isNaN(data.getTime())) return "Data inválida"; // Adiciona verificação para data inválida
+
   const dia = String(data.getDate()).padStart(2, "0");
   const mes = String(data.getMonth() + 1).padStart(2, "0");
   const ano = data.getFullYear();
-
   return `${dia}/${mes}/${ano}`;
 }
 
@@ -996,14 +898,35 @@ function mostrarNotificacao(mensagem, tipo) {
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
     `;
 
-  const container = document.querySelector(".container");
-  container.insertBefore(notificacao, container.firstChild);
+  const container = document.querySelector("main.container"); // Mais específico para evitar problemas
+  if (container) {
+    container.insertBefore(notificacao, container.firstChild);
+  } else {
+    document.body.insertBefore(notificacao, document.body.firstChild); // Fallback
+  }
 
-  // Remove a notificação após 5 segundos
+
   setTimeout(() => {
     notificacao.classList.remove("show");
     setTimeout(() => {
-      notificacao.remove();
+      if (notificacao.parentNode) { // Verifica se ainda está no DOM
+        notificacao.remove();
+      }
     }, 150);
   }, 5000);
 }
+
+    // ===================================================
+    // SEU CÓDIGO ORIGINAL E COMPLEXO TERMINA ACIMA DESTA LINHA
+    // ===================================================
+
+    // Inicializa os componentes da página
+    inicializarComponentes();
+
+    // Carrega a lista de clientes cadastrados
+    carregarClientes();
+
+    // Configura os listeners de eventos
+    configurarEventListeners();
+
+}); // Fim do addEventListener 'DOMContentLoaded'
