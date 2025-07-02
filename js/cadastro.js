@@ -206,106 +206,86 @@ function configurarEventListeners() {
  * e atualiza a tabela na interface
  */
 function carregarClientes() {
-  // Referência à tabela de clientes
-  const tabelaClientes = document.getElementById("tabelaClientes");
-  const nenhumCliente = document.getElementById("nenhumCliente");
+    // Acessa a *coleção* 'clientes' e pega os documentos
+    db.collection('clientes').get().then((querySnapshot) => {
+        const tabelaClientes = document.getElementById("tabelaClientes");
+        const nenhumCliente = document.getElementById("nenhumCliente");
+        const filtroCliente = document.getElementById("filtroCliente");
 
-  // Limpa a tabela
-  tabelaClientes.innerHTML = "";
+        // Limpa a tabela e o select de filtro
+        tabelaClientes.innerHTML = "";
+        filtroCliente.innerHTML = '<option value="">Todos os clientes</option>'; // Alterado de selectCliente para filtroCliente
 
-  // Busca os clientes no Firebase
-  dbRef.clientes
-    .once("value")
-    .then((snapshot) => {
-      const clientes = snapshot.val();
-
-      // Verifica se existem clientes cadastrados
-      if (objetoVazio(clientes)) {
-        nenhumCliente.classList.remove("d-none");
-        return;
-      }
-
-      nenhumCliente.classList.add("d-none");
-
-      // Preenche o select de filtro de clientes
-      const filtroCliente = document.getElementById("filtroCliente");
-      filtroCliente.innerHTML = '<option value="">Todos os clientes</option>';
-
-      // Adiciona cada cliente à tabela
-      Object.keys(clientes).forEach((id) => {
-        const cliente = clientes[id];
-
-        // Adiciona ao filtro
-        const option = document.createElement("option");
-        option.value = id;
-        option.textContent = cliente.nome;
-        filtroCliente.appendChild(option);
-
-        // Cria a linha da tabela
-        const tr = document.createElement("tr");
-        tr.dataset.id = id;
-
-        // Define a classe de acordo com o status
-        if (cliente.StatusCadastro === "Em andamento") {
-          tr.classList.add("table-warning");
-        } else if (cliente.StatusCadastro === "Concluído") {
-          tr.classList.add("table-success");
+        // Verifica se existem clientes cadastrados
+        if (querySnapshot.empty) {
+            nenhumCliente.classList.remove("d-none");
+            return;
         }
 
-        // Formata a data de criação
-        const dataCriacao = formatarData(cliente.dataCriacao);
+        nenhumCliente.classList.add("d-none");
 
-        // Conteúdo da linha
-        tr.innerHTML = `
-                    <td>${cliente.nome}</td>
-                    <td>${dataCriacao}</td>
-                    <td>
-                        <span class="badge ${getBadgeClass(
-                          cliente.StatusCadastro
-                        )}">${cliente.StatusCadastro || "Não iniciado"}</span>
-                    </td>
-                    <td>
-                        <button class="btn btn-sm btn-info me-1 btn-visualizar" onclick="visualizarCliente('${id}')">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                        <button class="btn btn-sm btn-primary" onclick="editarCliente('${id}')">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                    </td>
-                `;
+        // Itera sobre o resultado
+        querySnapshot.forEach((doc) => {
+            const cliente = doc.data(); // Dados do cliente
+            const clienteId = doc.id; // ID do documento
 
-        tabelaClientes.appendChild(tr);
-      });
+            // Adiciona ao filtro
+            const option = document.createElement('option');
+            option.value = clienteId;
+            option.textContent = cliente.nome;
+            filtroCliente.appendChild(option);
 
-      // Adiciona os event listeners aos botões de visualização
-      const botoesVisualizar = document.querySelectorAll(".btn-visualizar");
-      console.log(
-        "Botões de visualização encontrados:",
-        botoesVisualizar.length
-      );
+            // Cria a linha da tabela
+            const tr = document.createElement("tr");
+            tr.dataset.id = clienteId;
 
-      botoesVisualizar.forEach(function (botao) {
-        botao.addEventListener("click", function (e) {
-          console.log("Botão de visualização clicado");
-          const clienteId = this.closest("tr").dataset.id;
-          console.log("ID do cliente:", clienteId);
+            // Define a classe de acordo com o status
+            if (cliente.StatusCadastro === "Em andamento") {
+                tr.classList.add("table-warning");
+            } else if (cliente.StatusCadastro === "Concluído") {
+                tr.classList.add("table-success");
+            }
 
-          try {
-            console.log("Tentando chamar visualizarCliente...");
-            visualizarCliente(clienteId);
-          } catch (error) {
-            console.error("Erro ao chamar visualizarCliente:", error);
-            alert("Erro ao visualizar cliente: " + error.message);
-          }
+            // Formata a data de criação
+            const dataCriacao = formatarData(cliente.dataCriacao);
+
+            // Conteúdo da linha
+            tr.innerHTML = `
+                <td>${cliente.nome}</td>
+                <td>${dataCriacao}</td>
+                <td>
+                    <span class="badge ${getBadgeClass(
+                        cliente.StatusCadastro
+                    )}">${cliente.StatusCadastro || "Não iniciado"}</span>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-info me-1 btn-visualizar" onclick="visualizarCliente('${clienteId}')">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button class="btn btn-sm btn-primary" onclick="editarCliente('${clienteId}')">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                </td>
+            `;
+
+            tabelaClientes.appendChild(tr);
         });
-      });
-    })
-    .catch((error) => {
-      console.error("Erro ao carregar clientes:", error);
-      mostrarNotificacao(
-        "Erro ao carregar clientes. Tente novamente.",
-        "danger"
-      );
+
+        // Adiciona os event listeners aos botões de visualização (mantido como estava)
+        const botoesVisualizar = document.querySelectorAll(".btn-visualizar");
+        botoesVisualizar.forEach(function (botao) {
+            botao.addEventListener('click', function() {
+                const clienteId = this.closest('tr').dataset.id;
+                visualizarCliente(clienteId);
+            });
+        });
+
+    }).catch((error) => {
+        console.error("Erro ao carregar clientes: ", error);
+        mostrarNotificacao(
+            "Erro ao carregar clientes. Tente novamente.",
+            "danger"
+        );
     });
 }
 
