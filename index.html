@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistema de Controle de Compras e Recebimento</title>
-    <link rel="icon" href="assets/img/logo.png" type="image/png">
     <link rel="stylesheet" href="css/main.css">
     <!-- Bootstrap para responsividade e componentes -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -12,7 +11,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Animate.css para animações -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
-<script src="https://lib.youware.com/youware-lib.1747145198.js" id="yourware-lib"></script><script src="https://lib.youware.com/youware-lib.1747145198.js" id="yourware-lib"></script><script src="https://lib.youware.com/youware-lib.1747145198.js" id="yourware-lib"></script></head>
+<script src="https://lib.youware.com/youware-lib.1747145198.js" id="yourware-lib"></script><script src="https://lib.youware.com/youware-lib.1747145198.js" id="yourware-lib"></script></head>
 <body>
     <header class="bg-dark text-white py-3">
         <div class="container">
@@ -52,8 +51,8 @@
                         <a class="nav-link" href="pages/separacao.html">Separação</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="codigo-fonte.html">
-                            <i class="fas fa-code"></i> Código-Fonte
+                        <a class="nav-link" href="pages/ver-codigo.html" target="_blank">
+                            <i class="fas fa-code"></i> Ver Código
                         </a>
                     </li>
                 </ul>
@@ -90,8 +89,8 @@
                     <a href="pages/separacao.html" class="btn btn-primary btn-lg">
                         <i class="fas fa-box-open"></i> Separação
                     </a>
-                    <a href="codigo-fonte.html" class="btn btn-dark btn-lg">
-                        <i class="fas fa-code"></i> Ver Código-Fonte
+                    <a href="pages/ver-codigo.html" target="_blank" class="btn btn-dark btn-lg">
+                        <i class="fas fa-code"></i> Ver Código
                     </a>
                 </div>
             </div>
@@ -152,9 +151,9 @@
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Firebase SDK - APENAS FIRESTORE -->
+    <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
     <!-- Scripts do sistema -->
     <script src="js/firebase-config.js"></script>
     <script src="js/global.js"></script>

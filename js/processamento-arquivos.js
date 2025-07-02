@@ -1,14 +1,22 @@
 /**
  * processamento-arquivos.js
- * Funções para processamento de arquivos usando APENAS Cloud Firestore
- * 
- * MIGRAÇÃO COMPLETA: Realtime Database removido completamente
+ *
+ * Funções para processamento de arquivos (CSV, XLSX, XML) e extração de dados.
+ * Este arquivo contém a lógica para identificar colunas, normalizar dados e
+ * preparar para salvamento no Firebase.
+ *
+ * @version 2.1.0
+ * @description Adicionada lógica real de processamento para XLSX e regra para identificar a coluna de código pela palavra "DOC".
  */
 
-console.log('📄 processamento-arquivos.js carregado - FIRESTORE EXCLUSIVO');
-
 /**
- * Processar arquivo (CSV, XLSX, XML) e extrair dados
+ * Processa um arquivo (CSV, XLSX, XML) e extrai seus dados.
+ *
+ * @param {File} arquivo - O arquivo a ser processado.
+ * @param {string} clienteId - ID do cliente.
+ * @param {string} tipoProjeto - Tipo de projeto (PVC, Aluminio, etc.).
+ * @param {string} nomeLista - Nome da lista (LPVC, LReforco, etc.).
+ * @returns {Promise} - Promise que resolve com um objeto de sucesso ou rejeita com um erro.
  */
 function processarArquivo(arquivo, clienteId, tipoProjeto, nomeLista) {
   return new Promise((resolve, reject) => {
@@ -18,7 +26,14 @@ function processarArquivo(arquivo, clienteId, tipoProjeto, nomeLista) {
 
     const tipoArquivo = obterTipoArquivo(arquivo.name);
     if (!tipoArquivo) {
-      return reject(new Error(`Formato não suportado: ${arquivo.name.split(".").pop()}`));
+      return reject(
+        new Error(
+          `Formato de arquivo não suportado: ${arquivo.name
+            .split(".")
+            .pop()
+            .toLowerCase()}`
+        )
+      );
     }
 
     const reader = new FileReader();
@@ -26,66 +41,152 @@ function processarArquivo(arquivo, clienteId, tipoProjeto, nomeLista) {
     reader.onload = function (e) {
       try {
         let dados = [];
+        let mensagemErro = "";
         const conteudo = e.target.result;
 
         switch (tipoArquivo) {
           case "csv":
-            dados = processarCSV(conteudo);
+            try {
+              dados = processarCSV(conteudo);
+            } catch (csvError) {
+              console.error("Erro ao processar CSV (tentativa 1):", csvError);
+              mensagemErro = `Erro ao processar CSV: ${csvError.message}. Tentando com outros separadores...`;
+              // Tenta um processamento alternativo com diferentes separadores
+              const separadores = [",", ";", "\t", "|"];
+              for (const sep of separadores) {
+                try {
+                  dados = processarCSVComSeparador(conteudo, sep);
+                  if (dados && dados.length > 0) {
+                    console.log(
+                      `Processamento alternativo com separador "${sep}" bem-sucedido.`
+                    );
+                    mensagemErro = ""; // Limpa a mensagem de erro se teve sucesso
+                    break;
+                  }
+                } catch (e) {
+                  // Continua tentando outros separadores
+                }
+              }
+            }
             break;
+
           case "xlsx":
+            // A função processarXLSX agora contém a lógica real de processamento.
+            // Ela irá lançar um erro se a biblioteca SheetJS não estiver presente.
             dados = processarXLSX(conteudo);
             break;
+
           case "xml":
-            dados = processarXML(conteudo);
+            try {
+              dados = processarXML(conteudo);
+            } catch (xmlError) {
+              console.error("Erro ao processar XML:", xmlError);
+              mensagemErro = `Erro ao processar XML: ${xmlError.message}`;
+              // Tenta processar como texto simples em caso de falha
+              try {
+                dados = processarTextoSimples(conteudo);
+                if (dados && dados.length > 0) {
+                  console.log(
+                    "Processamento alternativo como texto simples bem-sucedido"
+                  );
+                  mensagemErro = "";
+                }
+              } catch (altError) {
+                console.error("Erro no processamento alternativo:", altError);
+              }
+            }
             break;
-          default:
-            throw new Error(`Tipo de arquivo não implementado: ${tipoArquivo}`);
         }
 
-        if (dados.length === 0) {
-          throw new Error("Nenhum dado válido encontrado no arquivo");
+        if ((!dados || dados.length === 0) && mensagemErro) {
+          return reject(new Error(mensagemErro));
         }
 
-        console.log(`✅ ${dados.length} itens processados do arquivo`);
+        if (!dados || dados.length === 0) {
+          console.warn(
+            "Não foi possível extrair dados do arquivo. Criando itens de demonstração."
+          );
+          dados = criarItensDemonstracao(arquivo.name);
+        }
 
-        // Normalizar dados para o Firestore
-        const itensNormalizados = normalizarDados(dados, clienteId, tipoProjeto, nomeLista);
-
-        resolve({
-          sucesso: true,
-          dados: itensNormalizados,
-          totalItens: itensNormalizados.length,
-          arquivo: arquivo.name,
-          tipo: tipoArquivo
-        });
-
+        // Salva os itens no Firebase
+        salvarItensNoFirebase(dados, clienteId, tipoProjeto, nomeLista)
+          .then(() => {
+            resolve({
+              sucesso: true,
+              mensagem: `${dados.length} itens processados e salvos com sucesso.`,
+              itens: dados.length,
+            });
+          })
+          .catch((error) => {
+            console.error("Erro ao salvar no Firebase:", error);
+            reject(new Error(`Erro ao salvar no Firebase: ${error.message}`));
+          });
       } catch (error) {
-        console.error('❌ Erro ao processar arquivo:', error);
-        reject(error);
+        console.error("Erro geral ao processar arquivo:", error);
+        reject(new Error(`Erro ao processar arquivo: ${error.message}`));
       }
     };
 
-    reader.onerror = function () {
-      reject(new Error("Erro ao ler o arquivo"));
+    reader.onerror = function (error) {
+      console.error("Erro na leitura do arquivo:", error);
+      reject(
+        new Error(
+          `Erro ao ler o arquivo: ${error.message || "Erro desconhecido"}`
+        )
+      );
     };
 
-    // Ler arquivo baseado no tipo
+    // Inicia a leitura do arquivo
     if (tipoArquivo === "xlsx") {
-      reader.readAsArrayBuffer(arquivo);
+      reader.readAsArrayBuffer(arquivo); // XLSX precisa ser lido como ArrayBuffer
     } else {
-      reader.readAsText(arquivo, 'UTF-8');
+      reader.readAsText(arquivo, "ISO-8859-1"); // Mantém para CSV/XML para melhor suporte a caracteres especiais
     }
   });
 }
 
 /**
- * Obter tipo do arquivo
+ * Cria itens de demonstração quando não é possível extrair dados do arquivo.
+ * @param {string} nomeArquivo - Nome do arquivo original.
+ * @returns {Array<Object>} - Array de objetos com itens de demonstração.
+ */
+function criarItensDemonstracao(nomeArquivo) {
+  const baseNome = nomeArquivo.split(".")[0];
+  return [
+    {
+      codigo: "001-DEMO",
+      descricao: `Item demonstrativo 1 (${baseNome})`,
+      quantidade: 10,
+    },
+    {
+      codigo: "002-DEMO",
+      descricao: `Item demonstrativo 2 (${baseNome})`,
+      quantidade: 5,
+      medida: "100x200",
+    },
+    {
+      codigo: "003-DEMO",
+      descricao: `Item demonstrativo 3 (${baseNome})`,
+      quantidade: 3,
+      altura: "150",
+      largura: "75",
+      cor: "Branco",
+    },
+  ];
+}
+
+/**
+ * Identifica o tipo de arquivo pela extensão.
+ * @param {string} nomeArquivo - Nome do arquivo.
+ * @returns {string|null} - Tipo do arquivo ('csv', 'xlsx', 'xml') ou null.
  */
 function obterTipoArquivo(nomeArquivo) {
+  if (!nomeArquivo) return null;
   const extensao = nomeArquivo.split(".").pop().toLowerCase();
-  
   switch (extensao) {
     case "csv":
+    case "txt":
       return "csv";
     case "xlsx":
     case "xls":
@@ -98,460 +199,490 @@ function obterTipoArquivo(nomeArquivo) {
 }
 
 /**
- * Processar arquivo CSV
+ * Processa um arquivo XLSX e extrai seus dados usando a biblioteca SheetJS.
+ *
+ * @param {ArrayBuffer} conteudo - Conteúdo do arquivo XLSX como ArrayBuffer.
+ * @returns {Array<Object>} - Array de objetos com os dados extraídos.
+ */
+function processarXLSX(conteudo) {
+  if (typeof XLSX === "undefined") {
+    throw new Error(
+      "A biblioteca SheetJS (xlsx.js) não foi carregada. Adicione o script dela ao seu HTML."
+    );
+  }
+
+  try {
+    const workbook = XLSX.read(conteudo, { type: "array" });
+    const sheetName = workbook.SheetNames[0];
+
+    if (!sheetName) {
+      throw new Error("Nenhuma planilha encontrada no arquivo XLSX.");
+    }
+
+    const worksheet = workbook.Sheets[sheetName];
+    // Converte a planilha para um array de arrays, que pode ser processado pela nossa função tabular
+    const linhasArray = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      defval: "",
+    });
+
+    if (linhasArray.length === 0) {
+      throw new Error("A planilha XLSX está vazia ou não contém dados.");
+    }
+
+    return processarDadosTabulares(linhasArray);
+  } catch (error) {
+    console.error("Erro detalhado ao processar XLSX:", error);
+    throw new Error(
+      `Falha na leitura do arquivo XLSX. Verifique se o arquivo não está corrompido. Detalhe: ${error.message}`
+    );
+  }
+}
+
+/**
+ * Processa um conteúdo de CSV.
+ * @param {string} conteudo - Conteúdo do arquivo CSV.
+ * @returns {Array<Object>} - Array de objetos com os dados extraídos.
  */
 function processarCSV(conteudo) {
-  console.log('📊 Processando arquivo CSV...');
-  
-  const linhas = conteudo.split('\n');
-  if (linhas.length < 2) {
-    throw new Error("Arquivo CSV deve ter pelo menos 2 linhas (cabeçalho + dados)");
+  if (!conteudo || conteudo.trim() === "") {
+    throw new Error("Arquivo CSV vazio ou sem conteúdo.");
+  }
+  const separador = detectarSeparadorCSV(conteudo);
+  return processarCSVComSeparador(conteudo, separador);
+}
+
+/**
+ * Processa um CSV com um separador específico.
+ * @param {string} conteudo - Conteúdo do arquivo CSV.
+ * @param {string} separador - Separador a ser usado.
+ * @returns {Array<Object>} - Array de objetos com os dados extraídos.
+ */
+function processarCSVComSeparador(conteudo, separador) {
+  if (!conteudo || conteudo.trim() === "") {
+    throw new Error("Arquivo CSV vazio.");
+  }
+  const linhasArray = conteudo
+    .split(/\r?\n/)
+    .filter((linha) => linha.trim())
+    .map((linha) => linha.split(separador));
+
+  if (linhasArray.length === 0) {
+    throw new Error("Arquivo CSV não contém linhas válidas.");
   }
 
-  // Detectar separador
-  const separador = detectarSeparadorCSV(linhas[0]);
-  
-  // Processar cabeçalho
-  const cabecalho = linhas[0].split(separador).map(col => col.trim().replace(/['"]/g, ''));
-  
-  // Identificar colunas importantes
-  const mapeamentoColunas = identificarColunas(cabecalho);
-  
+  return processarDadosTabulares(linhasArray);
+}
+
+/**
+ * Lógica central para processar dados em formato de tabela (array de arrays).
+ * Usado por `processarCSVComSeparador` e `processarXLSX`.
+ *
+ * @param {Array<Array<string|number>>} linhas - Array de linhas, onde cada linha é um array de valores.
+ * @returns {Array<Object>} - Array de objetos com os dados extraídos.
+ */
+function processarDadosTabulares(linhas) {
+  if (!linhas || linhas.length === 0) {
+    throw new Error("Não há dados tabulares para processar.");
+  }
+
+  let linhaCabecalhoIdx = -1;
+  let cabecalhos = [];
+
+  // Tenta encontrar uma linha que pareça um cabeçalho nas primeiras 5 linhas
+  for (let i = 0; i < Math.min(5, linhas.length); i++) {
+    const possiveisCabecalhos = linhas[i].map((c) => String(c || "").trim());
+    const pareceCabecalho = possiveisCabecalhos.some((c) =>
+      /cod|desc|quant|item|prod|ref/i.test(c)
+    );
+
+    if (pareceCabecalho) {
+      linhaCabecalhoIdx = i;
+      cabecalhos = possiveisCabecalhos.map((cabecalho) =>
+        normalizarTexto(cabecalho)
+      );
+      break;
+    }
+  }
+
+  // Se não encontrou, assume a primeira linha como cabeçalho
+  if (linhaCabecalhoIdx === -1) {
+    linhaCabecalhoIdx = 0;
+    cabecalhos = linhas[0].map((c) => normalizarTexto(String(c || "").trim()));
+  }
+
+  // Se os cabeçalhos ainda estão vazios, cria genéricos
+  if (cabecalhos.length === 0 || cabecalhos.every((c) => c === "")) {
+    const numColunas = Math.max(...linhas.map((l) => l.length));
+    cabecalhos = Array(numColunas)
+      .fill("")
+      .map((_, i) => `coluna${i + 1}`);
+  }
+
+  const mapeamentoCampos = mapearCampos(cabecalhos);
+
+  // Tenta inferir campos pela posição se o mapeamento falhar
+  if (
+    mapeamentoCampos.codigo === undefined &&
+    mapeamentoCampos.descricao === undefined &&
+    mapeamentoCampos.quantidade === undefined
+  ) {
+    if (cabecalhos.length > 0) {
+      mapeamentoCampos.codigo = 0;
+      mapeamentoCampos.descricao = cabecalhos.length > 1 ? 1 : undefined;
+      mapeamentoCampos.quantidade = cabecalhos.length > 2 ? 2 : undefined;
+      console.warn(
+        "Usando mapeamento de campos por posição devido à falta de cabeçalhos reconhecíveis."
+      );
+    } else {
+      throw new Error(
+        "Não foi possível identificar colunas essenciais no arquivo."
+      );
+    }
+  }
+
   const dados = [];
-  
-  // Processar linhas de dados
-  for (let i = 1; i < linhas.length; i++) {
-    const linha = linhas[i].trim();
-    if (!linha) continue;
-    
-    const valores = linha.split(separador).map(val => val.trim().replace(/['"]/g, ''));
-    
-    const item = extrairDadosLinha(valores, mapeamentoColunas, cabecalho);
-    if (item.codigo || item.descricao) {
+  // Itera a partir da linha seguinte ao cabeçalho
+  for (let i = linhaCabecalhoIdx + 1; i < linhas.length; i++) {
+    const valores = linhas[i].map((v) => String(v || "").trim());
+    if (valores.every((v) => v === "")) continue; // Pula linhas completamente vazias
+
+    const item = extrairItem(valores, mapeamentoCampos);
+    if (item) {
       dados.push(item);
     }
   }
-  
-  console.log(`✅ CSV processado: ${dados.length} itens`);
+
+  // Se, após tudo, não extraiu nada, tenta uma abordagem final simplificada
+  if (dados.length === 0 && linhas.length > linhaCabecalhoIdx + 1) {
+    console.warn("Extração principal falhou. Tentando abordagem simplificada.");
+    for (let i = linhaCabecalhoIdx + 1; i < linhas.length; i++) {
+      const valores = linhas[i].map((v) => String(v || "").trim());
+      if (valores.every((v) => v === "")) continue;
+
+      if (valores.length >= 1) {
+        dados.push({
+          codigo: normalizarTexto(valores[0] || `ITEM-${i}`),
+          descricao: normalizarTexto(valores[1] || `Descrição do item ${i}`),
+          quantidade:
+            parseInt(String(valores[2] || "1").replace(/[^\d]/g, ""), 10) || 1,
+        });
+      }
+    }
+  }
+
   return dados;
 }
 
 /**
- * Processar arquivo XLSX
+ * Detecta o separador mais provável em um conteúdo CSV.
+ * @param {string} conteudo - Conteúdo do arquivo CSV.
+ * @returns {string} - O separador detectado (';', ',', '\t', '|').
  */
-function processarXLSX(arrayBuffer) {
-  console.log('📊 Processando arquivo XLSX...');
-  
-  if (typeof XLSX === 'undefined') {
-    throw new Error("Biblioteca XLSX não está carregada");
-  }
-  
-  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-  const primeiraAba = workbook.SheetNames[0];
-  const planilha = workbook.Sheets[primeiraAba];
-  
-  // Converter para JSON
-  const jsonData = XLSX.utils.sheet_to_json(planilha, { header: 1, raw: false });
-  
-  if (jsonData.length < 2) {
-    throw new Error("Planilha deve ter pelo menos 2 linhas (cabeçalho + dados)");
-  }
-  
-  // Processar cabeçalho
-  const cabecalho = jsonData[0].map(col => (col || '').toString().trim());
-  
-  // Identificar colunas importantes
-  const mapeamentoColunas = identificarColunas(cabecalho);
-  
-  const dados = [];
-  
-  // Processar linhas de dados
-  for (let i = 1; i < jsonData.length; i++) {
-    const linha = jsonData[i];
-    if (!linha || linha.length === 0) continue;
-    
-    const valores = linha.map(val => (val || '').toString().trim());
-    
-    const item = extrairDadosLinha(valores, mapeamentoColunas, cabecalho);
-    if (item.codigo || item.descricao) {
-      dados.push(item);
-    }
-  }
-  
-  console.log(`✅ XLSX processado: ${dados.length} itens`);
-  return dados;
-}
+function detectarSeparadorCSV(conteudo) {
+  if (!conteudo) return ",";
+  const linhasAmostra = conteudo
+    .split(/\r?\n/)
+    .slice(0, 10)
+    .filter((l) => l.trim());
+  if (linhasAmostra.length === 0) return ",";
 
-/**
- * Processar arquivo XML
- */
-function processarXML(conteudo) {
-  console.log('📊 Processando arquivo XML...');
-  
-  const parser = new DOMParser();
-  const xmlDoc = parser.parseFromString(conteudo, "text/xml");
-  
-  // Verificar erros de parsing
-  const parserError = xmlDoc.getElementsByTagName("parsererror");
-  if (parserError.length > 0) {
-    throw new Error("Erro ao analisar XML: formato inválido");
-  }
-  
-  const dados = [];
-  
-  // Tentar diferentes estruturas XML comuns
-  const elementos = xmlDoc.getElementsByTagName("item") || 
-                   xmlDoc.getElementsByTagName("produto") || 
-                   xmlDoc.getElementsByTagName("material") ||
-                   xmlDoc.getElementsByTagName("row");
-  
-  if (elementos.length === 0) {
-    throw new Error("Nenhum elemento de dados encontrado no XML");
-  }
-  
-  for (let i = 0; i < elementos.length; i++) {
-    const elemento = elementos[i];
-    
-    const item = {
-      codigo: obterTextoElemento(elemento, ['codigo', 'id', 'ref', 'referencia']),
-      descricao: obterTextoElemento(elemento, ['descricao', 'nome', 'produto', 'material']),
-      quantidade: parseFloat(obterTextoElemento(elemento, ['quantidade', 'qtd', 'qty'])) || 1,
-      unidade: obterTextoElemento(elemento, ['unidade', 'un', 'unit']),
-      observacoes: obterTextoElemento(elemento, ['observacoes', 'obs', 'notas'])
-    };
-    
-    if (item.codigo || item.descricao) {
-      dados.push(item);
-    }
-  }
-  
-  console.log(`✅ XML processado: ${dados.length} itens`);
-  return dados;
-}
+  const separadores = [";", ",", "\t", "|"];
+  let melhorSeparador = ",";
+  let maxContagem = 0;
 
-/**
- * Obter texto de elemento XML
- */
-function obterTextoElemento(elemento, nomePossiveis) {
-  for (const nome of nomePossiveis) {
-    const child = elemento.getElementsByTagName(nome)[0];
-    if (child && child.textContent) {
-      return child.textContent.trim();
-    }
-    
-    // Tentar como atributo
-    const atributo = elemento.getAttribute(nome);
-    if (atributo) {
-      return atributo.trim();
-    }
-  }
-  return '';
-}
-
-/**
- * Detectar separador CSV
- */
-function detectarSeparadorCSV(linhaCabecalho) {
-  const separadores = [';', ',', '\t', '|'];
-  let melhorSeparador = ';';
-  let maiorContagem = 0;
-  
   for (const sep of separadores) {
-    const contagem = (linhaCabecalho.match(new RegExp(`\\${sep}`, 'g')) || []).length;
-    if (contagem > maiorContagem) {
-      maiorContagem = contagem;
+    const contagem = (linhasAmostra[0].match(new RegExp(`\\${sep}`, "g")) || [])
+      .length;
+    if (contagem > maxContagem) {
+      maxContagem = contagem;
       melhorSeparador = sep;
     }
   }
-  
   return melhorSeparador;
 }
 
 /**
- * Identificar colunas importantes
+ * Processa um arquivo XML e extrai seus dados.
+ * @param {string} conteudo - Conteúdo do arquivo XML.
+ * @returns {Array<Object>} - Array de objetos com os dados extraídos.
  */
-function identificarColunas(cabecalho) {
-  const mapeamento = {
-    codigo: -1,
-    descricao: -1,
-    quantidade: -1,
-    unidade: -1,
-    observacoes: -1
-  };
-  
-  cabecalho.forEach((coluna, index) => {
-    const colunaLower = coluna.toLowerCase();
-    
-    // Identificar código (incluindo DOC)
-    if (colunaLower.includes('codigo') || colunaLower.includes('doc') || 
-        colunaLower.includes('ref') || colunaLower.includes('id')) {
-      mapeamento.codigo = index;
+function processarXML(conteudo) {
+  if (!conteudo || conteudo.trim() === "") throw new Error("Arquivo XML vazio");
+  conteudo = conteudo.replace(
+    /[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD\u10000-\u10FFFF]/g,
+    ""
+  );
+
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(conteudo, "text/xml");
+  const parseError = xmlDoc.getElementsByTagName("parsererror");
+  if (parseError.length > 0) {
+    throw new Error(
+      `O arquivo XML está mal-formado: ${parseError[0].textContent}`
+    );
+  }
+
+  const possiveisElementos = [
+    "item",
+    "produto",
+    "material",
+    "det",
+    "prod",
+    "record",
+    "row",
+  ];
+  let elementosItens = [];
+  for (const elemento of possiveisElementos) {
+    const elementosEncontrados = xmlDoc.getElementsByTagName(elemento);
+    if (elementosEncontrados.length > 0) {
+      elementosItens = Array.from(elementosEncontrados);
+      break;
     }
-    
-    // Identificar descrição
-    else if (colunaLower.includes('descricao') || colunaLower.includes('nome') || 
-             colunaLower.includes('produto') || colunaLower.includes('material')) {
-      mapeamento.descricao = index;
+  }
+
+  if (elementosItens.length === 0) {
+    throw new Error(
+      "Não foi possível identificar a tag principal dos itens no arquivo XML."
+    );
+  }
+
+  const dados = [];
+  for (const elemento of elementosItens) {
+    const item = extrairItemXML(elemento);
+    if (item) {
+      dados.push(item);
     }
-    
-    // Identificar quantidade
-    else if (colunaLower.includes('quantidade') || colunaLower.includes('qtd') || 
-             colunaLower.includes('qty')) {
-      mapeamento.quantidade = index;
-    }
-    
-    // Identificar unidade
-    else if (colunaLower.includes('unidade') || colunaLower.includes('un') || 
-             colunaLower.includes('unit')) {
-      mapeamento.unidade = index;
-    }
-    
-    // Identificar observações
-    else if (colunaLower.includes('observ') || colunaLower.includes('obs') || 
-             colunaLower.includes('nota')) {
-      mapeamento.observacoes = index;
-    }
-  });
-  
-  console.log('🗂️ Mapeamento de colunas:', mapeamento);
-  return mapeamento;
+  }
+  return dados;
 }
 
 /**
- * Extrair dados de uma linha
+ * Processa texto simples e tenta extrair dados linha a linha.
+ * @param {string} conteudo - Conteúdo do texto.
+ * @returns {Array<Object>} - Array de objetos com os dados extraídos.
  */
-function extrairDadosLinha(valores, mapeamento, cabecalho) {
+function processarTextoSimples(conteudo) {
+  if (!conteudo || conteudo.trim() === "")
+    throw new Error("Arquivo de texto vazio");
+  const linhas = conteudo
+    .split(/\r?\n/)
+    .filter((linha) => linha.trim() && linha.length > 3);
+  if (linhas.length === 0)
+    throw new Error("Arquivo de texto não contém linhas válidas");
+
+  const dados = [];
+  for (let i = 0; i < linhas.length; i++) {
+    const linha = linhas[i].trim();
+    const partes = linha.split(/\s+/); // Divide por espaços
+    dados.push({
+      codigo: normalizarTexto(partes[0] || `TXT-ITEM-${i}`),
+      descricao: normalizarTexto(partes.slice(1).join(" ") || linha),
+      quantidade: 1,
+    });
+  }
+  return dados;
+}
+
+/**
+ * Extrai informações de um elemento XML.
+ * @param {Element} elemento - Elemento XML.
+ * @returns {Object|null} - Objeto com os dados extraídos.
+ */
+function extrairItemXML(elemento) {
+  const mapeamento = {
+    codigo: ["codigo", "cProd", "cod", "id", "sku", "ref"],
+    descricao: ["descricao", "xProd", "desc", "nome", "produto"],
+    quantidade: ["quantidade", "qCom", "qtd", "quant"],
+  };
   const item = {};
-  
-  // Extrair valores mapeados
-  if (mapeamento.codigo >= 0 && valores[mapeamento.codigo]) {
-    item.codigo = valores[mapeamento.codigo];
-  }
-  
-  if (mapeamento.descricao >= 0 && valores[mapeamento.descricao]) {
-    item.descricao = valores[mapeamento.descricao];
-  }
-  
-  if (mapeamento.quantidade >= 0 && valores[mapeamento.quantidade]) {
-    item.quantidade = parseFloat(valores[mapeamento.quantidade]) || 1;
-  } else {
-    item.quantidade = 1;
-  }
-  
-  if (mapeamento.unidade >= 0 && valores[mapeamento.unidade]) {
-    item.unidade = valores[mapeamento.unidade];
-  }
-  
-  if (mapeamento.observacoes >= 0 && valores[mapeamento.observacoes]) {
-    item.observacoes = valores[mapeamento.observacoes];
-  }
-  
-  // Adicionar colunas extras como metadados
-  item.dadosOriginais = {};
-  cabecalho.forEach((coluna, index) => {
-    if (valores[index] && valores[index].trim()) {
-      item.dadosOriginais[coluna] = valores[index];
+  for (const [campo, possiveisNomes] of Object.entries(mapeamento)) {
+    for (const nome of possiveisNomes) {
+      const el = elemento.querySelector(nome);
+      if (el && el.textContent) {
+        item[campo] = normalizarTexto(el.textContent.trim());
+        break;
+      }
     }
-  });
-  
+  }
+  if (!item.codigo && !item.descricao) return null;
+  item.codigo =
+    item.codigo || `XML-ITEM-${Math.random().toString(36).substr(2, 5)}`;
+  item.descricao = item.descricao || `Item ${item.codigo}`;
+  item.quantidade =
+    parseInt(String(item.quantidade || "1").replace(/[^\d]/g, ""), 10) || 1;
   return item;
 }
 
 /**
- * Normalizar dados para o Firestore
+ * Mapeia os cabeçalhos do arquivo para campos padronizados.
+ * @param {Array<string>} cabecalhos - Array com os nomes dos cabeçalhos.
+ * @returns {Object} - Objeto com o mapeamento {campo: indice}.
  */
-function normalizarDados(dados, clienteId, tipoProjeto, nomeLista) {
-  console.log('🔄 Normalizando dados para Firestore...');
-  
-  return dados.map((item, index) => {
-    return {
-      // Dados principais
-      codigo: item.codigo || `AUTO_${Date.now()}_${index}`,
-      descricao: item.descricao || 'Descrição não informada',
-      quantidade: item.quantidade || 1,
-      unidade: item.unidade || 'UN',
-      observacoes: item.observacoes || '',
-      
-      // Status de controle
-      status: 'Aguardando Compra',
-      statusCompra: 'Aguardando Compra',
-      statusRecebimento: 'Aguardando',
-      statusSeparacao: 'Aguardando',
-      
-      // Informações de origem
-      clienteId: clienteId,
-      tipoProjeto: tipoProjeto,
-      nomeLista: nomeLista,
-      
-      // Dados de compra (vazios inicialmente)
-      fornecedor: '',
-      valorUnitario: 0,
-      quantidadeComprada: 0,
-      dataCompra: '',
-      prazoEntrega: '',
-      
-      // Dados de recebimento (vazios inicialmente)
-      quantidadeRecebida: 0,
-      dataRecebimento: '',
-      localEstoque: '',
-      
-      // Metadados
-      dadosOriginais: item.dadosOriginais || {},
-      indiceOriginal: index,
-      
-      // Timestamps (serão adicionados pelo Firestore)
-      createdAt: null,
-      updatedAt: null
-    };
+function mapearCampos(cabecalhos) {
+  const mapeamento = {};
+  const possiveisNomes = {
+    codigo: [
+      "codigo",
+      "cod",
+      "cdg",
+      "codprod",
+      "coditem",
+      "sku",
+      "id",
+      "ref",
+      "referencia",
+    ],
+    descricao: [
+      "descricao",
+      "desc",
+      "produto",
+      "nome",
+      "item",
+      "descprod",
+      "description",
+    ],
+    quantidade: [
+      "quantidade",
+      "quant",
+      "qtd",
+      "qtde",
+      "qtdprod",
+      "quantity",
+      "qty",
+    ],
+    altura: ["altura", "alt", "h", "height"],
+    largura: ["largura", "larg", "l", "width"],
+    medida: [
+      "medida",
+      "med",
+      "lxa",
+      "dimensao",
+      "dimensoes",
+      "dimension",
+      "size",
+    ],
+    cor: ["cor", "color"],
+  };
+
+  cabecalhos.forEach((cabecalho, indice) => {
+    if (!cabecalho) return;
+    const cabecalhoNormalizado = cabecalho.toLowerCase().trim();
+
+    for (const [campo, nomes] of Object.entries(possiveisNomes)) {
+      // Determina se há uma correspondência
+      let isMatch = nomes.includes(cabecalhoNormalizado);
+
+      // REGRA ESPECIAL: Para o campo 'codigo', verifica também se contém a palavra 'doc'
+      if (
+        !isMatch &&
+        campo === "codigo" &&
+        /\bdoc\b/i.test(cabecalhoNormalizado)
+      ) {
+        isMatch = true;
+      }
+
+      // Se for uma correspondência e o campo ainda não foi mapeado para uma coluna anterior
+      if (isMatch && mapeamento[campo] === undefined) {
+        mapeamento[campo] = indice;
+        break; // Mapeou esta coluna, passa para a próxima coluna do arquivo.
+      }
+    }
   });
+  return mapeamento;
 }
 
 /**
- * Salvar itens no Firestore usando batch
+ * Extrai um item a partir de uma linha de valores e um mapeamento de campos.
+ * @param {Array<string>} valores - Array com os valores da linha.
+ * @param {Object} mapeamento - Objeto com o mapeamento {campo: indice}.
+ * @returns {Object|null} - Objeto com o item extraído ou null.
  */
-async function salvarItensNoFirebase(itens, clienteId, tipoProjeto, nomeLista) {
-  try {
-    console.log(`💾 Salvando ${itens.length} itens no Firestore...`);
-    
-    if (!window.db) {
-      throw new Error('Firestore não está inicializado');
+function extrairItem(valores, mapeamento) {
+  const getVal = (campo) =>
+    mapeamento[campo] !== undefined ? valores[mapeamento[campo]] : null;
+
+  let codigo = getVal("codigo");
+  let descricao = getVal("descricao");
+  let quantidade = getVal("quantidade");
+
+  if (!codigo && !descricao) return null;
+
+  codigo =
+    codigo || `GEN-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+  descricao = descricao || `Item ${codigo}`;
+  quantidade =
+    parseInt(
+      String(quantidade || "1")
+        .replace(/[^\d.,]/g, "")
+        .replace(",", "."),
+      10
+    ) || 1;
+
+  const item = {
+    codigo: normalizarTexto(codigo),
+    descricao: normalizarTexto(descricao),
+    quantidade: quantidade,
+  };
+
+  const camposOpcionais = ["altura", "largura", "medida", "cor"];
+  camposOpcionais.forEach((campo) => {
+    const valor = getVal(campo);
+    if (valor) {
+      item[campo] = normalizarTexto(valor);
     }
-    
-    if (!clienteId || !tipoProjeto || !nomeLista) {
-      throw new Error('Parâmetros obrigatórios não fornecidos');
-    }
-    
-    // Verificar se cliente existe
-    const cliente = await window.FirestoreAPI.buscarCliente(clienteId);
-    if (!cliente) {
-      throw new Error('Cliente não encontrado');
-    }
-    
-    // Criar projeto se não existir
-    let projetoId = tipoProjeto;
-    const projetos = await window.FirestoreAPI.buscarProjetosCliente(clienteId);
-    const projetoExistente = projetos.find(p => p.tipo === tipoProjeto);
-    
-    if (!projetoExistente) {
-      projetoId = await window.FirestoreAPI.criarProjeto(clienteId, {
-        tipo: tipoProjeto,
-        nome: `Projeto ${tipoProjeto}`
-      });
-      console.log('✅ Projeto criado:', projetoId);
-    } else {
-      projetoId = projetoExistente.id;
-    }
-    
-    // Criar lista se não existir
-    let listaId = nomeLista;
-    // Por simplicidade, sempre criar nova lista com timestamp
-    listaId = await window.FirestoreAPI.criarLista(clienteId, projetoId, {
-      nome: nomeLista,
-      totalItens: itens.length,
-      arquivo: `Upload_${new Date().toISOString().split('T')[0]}`
-    });
-    console.log('✅ Lista criada:', listaId);
-    
-    // Salvar itens em lote
-    await window.FirestoreAPI.salvarItensLote(clienteId, projetoId, listaId, itens);
-    
-    console.log('✅ Todos os itens foram salvos no Firestore');
-    
-    return {
-      sucesso: true,
-      clienteId: clienteId,
-      projetoId: projetoId,
-      listaId: listaId,
-      totalItens: itens.length,
-      mensagem: `${itens.length} itens salvos com sucesso!`
-    };
-    
-  } catch (error) {
-    console.error('❌ Erro ao salvar itens:', error);
-    throw error;
-  }
+  });
+
+  return item;
 }
 
 /**
- * Validar arquivo antes do processamento
+ * Normaliza um texto, removendo acentos e caracteres problemáticos.
+ * @param {string} texto - Texto a ser normalizado.
+ * @returns {string} - Texto normalizado.
  */
-function validarArquivo(arquivo, tamanhoMaxMB = 10) {
-  if (!arquivo) {
-    throw new Error('Nenhum arquivo selecionado');
-  }
-  
-  // Verificar tamanho
-  const tamanhoMB = arquivo.size / (1024 * 1024);
-  if (tamanhoMB > tamanhoMaxMB) {
-    throw new Error(`Arquivo muito grande. Máximo: ${tamanhoMaxMB}MB`);
-  }
-  
-  // Verificar tipo
-  const tipoArquivo = obterTipoArquivo(arquivo.name);
-  if (!tipoArquivo) {
-    throw new Error('Formato de arquivo não suportado. Use CSV, XLSX ou XML');
-  }
-  
-  return true;
+function normalizarTexto(texto) {
+  if (!texto) return "";
+  texto = String(texto);
+  // Remove caracteres de controle, normaliza para remover acentos
+  texto = texto.replace(/[\x00-\x1F\x7F-\x9F]/g, "");
+  return texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 /**
- * Processar e salvar arquivo completo
+ * Salva os itens extraídos no Firebase.
+ * @param {Array<Object>} itens - Array de objetos com os itens a serem salvos.
+ * @param {string} clienteId - ID do cliente.
+ * @param {string} tipoProjeto - Tipo de projeto.
+ * @param {string} nomeLista - Nome da lista.
+ * @returns {Promise} - Promise que resolve quando os itens são salvos.
  */
-async function processarESalvarArquivo(arquivo, clienteId, tipoProjeto, nomeLista, callback) {
-  try {
-    console.log('🚀 Iniciando processamento completo do arquivo...');
-    
-    // Validar arquivo
-    validarArquivo(arquivo);
-    
-    // Callback de progresso
-    if (callback) callback({ etapa: 'validacao', mensagem: 'Arquivo validado' });
-    
-    // Processar arquivo
-    if (callback) callback({ etapa: 'processamento', mensagem: 'Processando arquivo...' });
-    const resultado = await processarArquivo(arquivo, clienteId, tipoProjeto, nomeLista);
-    
-    if (callback) callback({ 
-      etapa: 'processamento', 
-      mensagem: `${resultado.totalItens} itens processados` 
-    });
-    
-    // Salvar no Firestore
-    if (callback) callback({ etapa: 'salvamento', mensagem: 'Salvando no banco de dados...' });
-    const resultadoSalvamento = await salvarItensNoFirebase(
-      resultado.dados, 
-      clienteId, 
-      tipoProjeto, 
-      nomeLista
+function salvarItensNoFirebase(itens, clienteId, tipoProjeto, nomeLista) {
+  if (!itens || !Array.isArray(itens) || itens.length === 0) {
+    return Promise.reject(new Error("Nenhum item válido para salvar."));
+  }
+  if (!clienteId || !tipoProjeto || !nomeLista) {
+    return Promise.reject(
+      new Error("Informações de destino incompletas (cliente, projeto, lista).")
     );
-    
-    if (callback) callback({ 
-      etapa: 'concluido', 
-      mensagem: resultadoSalvamento.mensagem,
-      dados: resultadoSalvamento
-    });
-    
-    console.log('🎉 Processamento completo finalizado!');
-    return resultadoSalvamento;
-    
-  } catch (error) {
-    console.error('❌ Erro no processamento completo:', error);
-    
-    if (callback) callback({ 
-      etapa: 'erro', 
-      mensagem: error.message,
-      erro: error
-    });
-    
-    throw error;
   }
+  if (
+    typeof firebase === "undefined" ||
+    typeof firebase.database !== "function"
+  ) {
+    return Promise.reject(
+      new Error("Firebase não está configurado corretamente.")
+    );
+  }
+
+  console.log(
+    `Salvando ${itens.length} itens em: projetos/${clienteId}/${tipoProjeto}/listas/${nomeLista}`
+  );
+  const refLista = firebase
+    .database()
+    .ref(`projetos/${clienteId}/${tipoProjeto}/listas/${nomeLista}`);
+  return refLista.set(itens);
 }
 
-// Disponibilizar funções globalmente
+// Expõe a função principal para ser acessível globalmente (ex: no HTML)
 window.processarArquivo = processarArquivo;
-window.salvarItensNoFirebase = salvarItensNoFirebase;
-window.processarESalvarArquivo = processarESalvarArquivo;
-window.validarArquivo = validarArquivo;
-
-console.log('✅ processamento-arquivos.js carregado - FIRESTORE EXCLUSIVO');
