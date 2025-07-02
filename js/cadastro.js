@@ -653,9 +653,20 @@ async function salvarCadastro() {
       projetosParaSalvar[tipo] = tipoProjeto;
     });
 
-    // 3. Salva os dados do cliente e os projetos usando 'update'
-    await dbRef.clientes.child(clienteId).update(clienteData);
-    await dbRef.projetos.child(clienteId).update(projetosParaSalvar);
+    // 3. Salva os dados do cliente e os projetos
+    if (isEditing) {
+      // Atualiza um documento existente
+      await db.collection('clientes').doc(clienteId).update(clienteData);
+      await db.collection('projetos').doc(clienteId).update(projetosParaSalvar);
+    } else {
+      // Adiciona um novo documento com um ID gerado automaticamente
+      // Primeiro, salva os dados básicos do cliente para obter o ID
+      const docRef = await db.collection('clientes').add(clienteData);
+      // Em seguida, usa esse ID para salvar os projetos
+      await db.collection('projetos').doc(docRef.id).set(projetosParaSalvar);
+      // É importante atualizar o clienteId para o novo ID gerado pelo Firestore para o processamento de arquivos
+      clienteId = docRef.id;
+    }
 
     // *** FIM DA CORREÇÃO LÓGICA ***
 
